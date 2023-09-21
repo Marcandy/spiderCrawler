@@ -3,10 +3,10 @@ const axios = require("axios");
 const router = require("express").Router();
 const { generateFilename, saveProductJson, generateTitle } = require("./utils");
 
-const baseURL = "https:///www.amazon.com";
+const baseURL = "https://www.amazon.com";
 
 router.post('/scrape', async (req, res) => {
-    console.log(req)
+    console.log(req.body)
 
     const { url } = req.body;
 
@@ -53,4 +53,6 @@ router.post('/scrape', async (req, res) => {
         })
     }
 
-})
+});
+
+module.exports = router;
