@@ -32,11 +32,24 @@ describe('scraper', () => {
         const savedProducts = await saveProductJson(products);
         expect(typeof savedProducts).toBe('string');
         expect(savedProducts).toMatch(/^\.\/data\/.*\.json$/);
-    })
+    });
 
 
     test('Post /scrape return a 200 status code', async ()=> {
         testScrapUrl =
       "https://www.amazon.com/s?k=all+headphones&crid=2TTXQBOK238J3&qid=1667301526&sprefix=all+headphones%2Caps%2C284&ref=sr_pg_1";
-    })
+
+      const body = {
+        url: testScrapUrl
+      }
+
+      const response = await request(server).post('/scrape').send(body);
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toHaveProperty('products_saved')
+    });
+});
+
+afterAll( ()=> {
+    cleanTestData();
+    server.close();
 })
