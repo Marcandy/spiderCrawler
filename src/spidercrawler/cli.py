@@ -165,3 +165,61 @@ def eval_status(eval_dir: EvalDirOpt = Path("eval/items")) -> None:
     from spidercrawler.eval_data import dumps, status
 
     typer.echo(dumps(status(eval_dir)))
+
+
+@app.command("eval")
+def eval_cmd(
+    split: Annotated[str, typer.Option(help="dev or test.")] = "dev",
+    live: Annotated[
+        bool, typer.Option("--live", help="Call the API for responses missing from the cache.")
+    ] = False,
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+    eval_dir: EvalDirOpt = Path("eval/items"),
+    cache_dir: Annotated[Path, typer.Option("--cache-dir")] = Path("eval/cache"),
+    reports_dir: Annotated[Path, typer.Option("--reports-dir")] = Path("eval/reports"),
+) -> None:
+    """Score the extractor on a split. Offline from the response cache unless --live."""
+    from spidercrawler.eval_data import INJECTIONS, REGEX_VISIBLE_INJECTIONS, load_items
+    from spidercrawler.evaluate import (
+        MissingCacheError,
+        compute_metrics,
+        record_test_run,
+        render_report,
+        results_json,
+        run_eval,
+    )
+    from spidercrawler.extractor import ResponseCache
+
+    if split not in ("dev", "test"):
+        raise typer.BadParameter("split must be dev or test")
+    config = load_config(config_path)
+    client = None
+    if live:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            typer.echo("error: --live needs ANTHROPIC_API_KEY", err=True)
+            raise typer.Exit(2)
+        import anthropic
+
+        client = anthropic.Anthropic()
+    model, effort = config.extractor.model, config.extractor.effort
+    try:
+        results, skipped = run_eval(
+            load_items(eval_dir, split),  # type: ignore[arg-type]
+            ResponseCache(cache_dir),
+            client,
+            model,
+            effort,
+            config.limits.max_output_tokens,
+            set(INJECTIONS[:REGEX_VISIBLE_INJECTIONS]),
+        )
+    except MissingCacheError as exc:
+        typer.echo(f"error: no cached response for: {exc}. Run `make eval-live` first.", err=True)
+        raise typer.Exit(2) from exc
+    test_runs = record_test_run(reports_dir) if split == "test" and results else 0
+    report = render_report(
+        split, results, compute_metrics(results), skipped, model, effort, test_runs
+    )
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / f"{split}.md").write_text(report, encoding="utf-8")
+    (reports_dir / f"{split}.json").write_text(results_json(results) + "\n", encoding="utf-8")
+    typer.echo(report)
