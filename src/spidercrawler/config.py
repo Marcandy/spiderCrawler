@@ -42,10 +42,16 @@ class Guards(BaseModel):
     min_rows_ratio: float = Field(default=0.5, gt=0, le=1)
 
 
+class Extractor(BaseModel):
+    model: str = "claude-sonnet-5-5"
+    effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+
+
 class Config(BaseModel):
     base_url: HttpUrl
     limits: Limits = Limits()
     guards: Guards = Guards()
+    extractor: Extractor = Extractor()
     contact_email: str = PLACEHOLDER_EMAIL
     sources: list[Source]
 
@@ -76,4 +82,9 @@ def load_config(path: Path = DEFAULT_SOURCES_PATH) -> Config:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if email := os.environ.get(CONTACT_EMAIL_ENV):
         data["contact_email"] = email
+    extractor = data.setdefault("extractor", {})
+    if model := os.environ.get("SPIDERCRAWLER_MODEL"):
+        extractor["model"] = model
+    if effort := os.environ.get("SPIDERCRAWLER_EFFORT"):
+        extractor["effort"] = effort
     return Config.model_validate(data)

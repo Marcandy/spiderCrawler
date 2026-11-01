@@ -1,5 +1,7 @@
 """End to end through the pipeline with a mock network: no real requests."""
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
 from conftest import (
@@ -15,7 +17,8 @@ from spidercrawler.cli import app
 from spidercrawler.config import Config
 from spidercrawler.fetcher import Fetcher
 from spidercrawler.pipeline import run_pipeline
-from spidercrawler.records import Document, Item, RecordStore, Run
+from spidercrawler.records import Document, Extraction, Item, RecordStore, Run
+from spidercrawler.schema import ChangeSummary, Claim
 
 BASE = "https://www.pacourts.us/courts/supreme-court/committees/rules-committees/"
 CRIM = BASE + "criminal-procedural-rules-committee"
@@ -73,11 +76,11 @@ class Site:
         return httpx.Response(404)
 
 
-def run(site, store, seed=False, cap=30, seed_only=None):
-    config = make_config(cap)
+def run(site, store, seed=False, cap=30, seed_only=None, llm=None, config=None):
+    config = config or make_config(cap)
     client = httpx.Client(transport=httpx.MockTransport(site.handler))
     fetcher = Fetcher(config, client=client, sleep=lambda s: None)
-    return run_pipeline(config, store, fetcher, seed=seed, seed_only=seed_only)
+    return run_pipeline(config, store, fetcher, seed=seed, seed_only=seed_only, llm=llm)
 
 
 @pytest.fixture
@@ -248,3 +251,73 @@ def test_cli_source_requires_seed_and_a_known_id(tmp_path, monkeypatch):
     base = ["run", "--config", str(sources), "--data-dir", str(tmp_path)]
     assert CliRunner().invoke(app, [*base, "--source", "crim"]).exit_code == 2
     assert CliRunner().invoke(app, [*base, "--seed", "--source", "nope"]).exit_code == 2
+
+
+# -- extraction ---------------------------------------------------------------------
+
+
+class FakeLLM:
+    """Stands in for anthropic.Anthropic(); counts calls, never touches the network."""
+
+    def __init__(self):
+        self.calls = 0
+        self.messages = self
+
+    def parse(self, **kwargs):
+        self.calls += 1
+        summary = ChangeSummary(
+            is_substantive=True, stage="proposed",
+            summary="Rule 632 would refer to persons reporting for jury service and to subdivision (h).",
+            rule_ids=["Rule 632"], effective_date_text=None, affected_parties=[],
+            expungement_relevance="no", confidence="high", abstain_reason=None,
+            claims=[
+                Claim(field="summary", value="v", evidence_quote="Persons reporting for jury service shall complete and verify the standard"),
+                Claim(field="rule_ids", value="v", evidence_quote="Rule 632. Juror Information Questionnaire."),
+            ],
+        )  # fmt: skip
+        return SimpleNamespace(stop_reason="end_turn", stop_details=None, parsed_output=summary,
+                               usage=SimpleNamespace(input_tokens=5000, output_tokens=700))  # fmt: skip
+
+
+def test_new_item_is_extracted_verified_and_routed(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    site.pages[CRIM] = with_new_proposed_row(site.pages[CRIM])
+    llm = FakeLLM()
+    result = run(site, store, llm=llm)
+    assert llm.calls == 1 and result.extractions_made == 1
+    assert result.tokens_used == 5700
+    (ext,) = list(store.iter(Extraction))
+    assert ext.model_id == "claude-sonnet-5-5" and ext.prompt_version.startswith("extract_v1:")
+    # Quotes are real; the page title names Rule 999, which the output lacks -> flagged.
+    assert ext.verifier_status == "pass_flagged"
+    assert any("Pa.R.Crim.P. 999" in f for f in ext.flags)
+    assert ext.queue_status == "needs_attention"
+    # Re-running does not pay twice for the same input.
+    assert run(site, store, llm=llm).extractions_made == 0 and llm.calls == 1
+
+
+def test_seeded_items_are_never_extracted(tmp_path, site):
+    llm = FakeLLM()
+    run(site, RecordStore(tmp_path), seed=True, llm=llm)
+    assert llm.calls == 0
+
+
+def test_budget_stops_extraction_and_items_wait(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    site.pages[CRIM] = with_new_proposed_row(site.pages[CRIM])
+    config = make_config()
+    config = config.model_copy(
+        update={"limits": config.limits.model_copy(update={"max_extractions_per_run": 0})}
+    )
+    llm = FakeLLM()
+    result = run(site, store, llm=llm, config=config)
+    assert llm.calls == 0 and any("extraction cap" in e for e in result.errors)
+    assert run(site, store, llm=llm).extractions_made == 1  # next run picks it up
+
+
+def test_without_llm_client_extraction_is_skipped_and_logged(tmp_path, site):
+    result = run(site, RecordStore(tmp_path), seed=True)
+    assert any(e.startswith("extraction skipped") for e in result.errors)
+    assert result.status == "ok"

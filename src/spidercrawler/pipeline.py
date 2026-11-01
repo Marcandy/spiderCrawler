@@ -8,8 +8,17 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from spidercrawler.budget import Budget
 from spidercrawler.config import Config, Source
 from spidercrawler.detector import KnownItem, detect, load_known
+from spidercrawler.extractor import (
+    CallResult,
+    LLMClient,
+    build_extraction,
+    build_user_message,
+    call_model,
+    load_prompt,
+)
 from spidercrawler.fetcher import Fetcher, FetchError, RequestCapError
 from spidercrawler.index_parser import parse_committee_page
 from spidercrawler.normalize import content_hash
@@ -17,11 +26,14 @@ from spidercrawler.parse_health import check_health, check_volume
 from spidercrawler.pdf_text import PdfError, extract_pdf_text
 from spidercrawler.records import (
     Document,
+    Extraction,
     Item,
     RecordStore,
     Run,
     utcnow,
 )
+from spidercrawler.schema import SCHEMA_VERSION
+from spidercrawler.verifier import RowContext
 
 # Context committees' items are only worth reading if they touch criminal rules.
 _CRIMINAL_REF = re.compile(r"Crim\.?\s*P|Criminal", re.IGNORECASE)
@@ -42,6 +54,7 @@ def run_pipeline(
     seed: bool = False,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
     seed_only: frozenset[str] | None = None,
+    llm: LLMClient | None = None,
 ) -> Run:
     """Run every source once. With `seed`, items are recorded without extraction; `seed_only`
     limits that to the named sources (accepting one tripped page must not swallow a genuinely
@@ -110,6 +123,12 @@ def run_pipeline(
         rows_seen[source.id] = len(parsed.rows)
 
     documents = 0 if cap_hit else _fetch_documents(config, records, fetcher, errors)
+    extraction_stats = (0, 0, 0)
+    if llm is None:
+        errors.append("extraction skipped: no LLM client (set ANTHROPIC_API_KEY)")
+    else:
+        extraction_stats = _extract(config, records, known, llm, errors)
+    extracted, blocked, tokens = extraction_stats
 
     run = Run(
         id=run_id,
@@ -121,6 +140,9 @@ def run_pipeline(
         items_found=found,
         documents_fetched=documents,
         requests_made=fetcher.requests_made,
+        extractions_made=extracted,
+        blocked=blocked,
+        tokens_used=tokens,
         errors=errors,
         page_validators=validators,
         rows_seen=rows_seen,
@@ -180,3 +202,67 @@ def _fetch_documents(
             have.add((item.id, url))
             fetched += 1
     return fetched
+
+
+def _extract(
+    config: Config,
+    records: RecordStore,
+    known: dict[str, KnownItem],
+    llm: LLMClient,
+    errors: list[str],
+) -> tuple[int, int, int]:
+    """Extract every eligible item that has all its documents and no current extraction.
+
+    Returns (extractions made, blocked, tokens used). Stops when the budget is hit.
+    """
+    sources = {s.id: s for s in config.sources}
+    system, prompt_version = load_prompt()
+    model, effort = config.extractor.model, config.extractor.effort
+    budget = Budget.from_limits(config.limits)
+    docs_by_item: dict[str, dict[str, Document]] = {}
+    for doc in records.iter(Document):
+        docs_by_item.setdefault(doc.item_id, {})[doc.url] = doc
+    current_table = {k.item.id: k.current_table for k in known.values()}
+    made = blocked = 0
+
+    for item in sorted(records.iter(Item), key=lambda i: i.first_seen_run):
+        source = sources.get(item.source_id)
+        docs = docs_by_item.get(item.id, {})
+        if not needs_documents(item, source) or any(u not in docs for u in item.doc_urls):
+            continue
+        ordered = [docs[u] for u in item.doc_urls]
+        source_text = "\n\n".join(d.text for d in ordered)
+        prefix = source.rule_prefix if source else "Pa.R.Crim.P."
+        row = RowContext(current_table.get(item.id, item.table), item.title,
+                         item.row_date_literal, prefix)  # fmt: skip
+        doc_flags = sorted(
+            {f for d in ordered for f in ("markup_lost", "no_text") if getattr(d, f)}
+        )
+        ext_id = Extraction.make_id(
+            item.id, model, effort, prompt_version, SCHEMA_VERSION, content_hash(source_text)
+        )
+        if records.exists(Extraction, ext_id):
+            continue
+        if "no_text" in doc_flags:
+            result = None  # nothing to read; a human looks at the PDF
+        elif not budget.try_start(source_text):
+            errors.append(f"extraction stopped: {budget.stopped_reason}; rest wait for next run")
+            break
+        else:
+            try:
+                result = call_model(llm, system, build_user_message(source_text, row), model,
+                                    effort, config.limits.max_output_tokens)  # fmt: skip
+            except Exception as exc:  # API errors: record, keep going within budget
+                errors.append(f"{item.id}: extraction call failed: {exc}")
+                continue
+            budget.record(result.input_tokens, result.output_tokens)
+        extraction = build_extraction(
+            item.id, source_text,
+            result or CallResult(None, "no_text: document has no text layer", 0, 0),
+            model=model, effort=effort, prompt_version=prompt_version, row=row,
+            rule_prefix=prefix, document_flags=doc_flags,
+        )  # fmt: skip
+        records.write(extraction)
+        made += result is not None
+        blocked += extraction.queue_status == "blocked"
+    return made, blocked, budget.tokens_used
