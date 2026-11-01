@@ -111,8 +111,13 @@ def eval_collect(
     if unknown:
         typer.echo(f"error: unknown item ids: {unknown}", err=True)
         raise typer.Exit(2)
+    try:
+        fetcher = Fetcher(config)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
     errors: list[str] = []
-    fetched = fetch_documents(config, records, Fetcher(config), errors, wanted=set(item_ids))
+    fetched = fetch_documents(config, records, fetcher, errors, wanted=set(item_ids))
     prefixes = {s.id: s.rule_prefix for s in config.sources}
     exported = 0
     for item_id in item_ids:

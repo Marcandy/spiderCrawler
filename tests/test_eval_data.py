@@ -5,6 +5,7 @@ import pytest
 
 from spidercrawler.eval_data import (
     INJECTIONS,
+    REGEX_VISIBLE_INJECTIONS,
     Labels,
     export_item,
     load_items,
@@ -71,8 +72,12 @@ def test_injection_item_is_marked_synthetic_and_trips_the_flag(tmp_path):
         make_injection(src, root, "test", variant=0)
 
 
-def test_every_injection_template_trips_suspicious_input():
-    assert all(_SUSPICIOUS.search(text) for text in INJECTIONS)
+def test_injection_set_is_not_circular():
+    """Five use known phrasings; three are paraphrased so the regex cannot see them."""
+    caught = [bool(_SUSPICIOUS.search(text)) for text in INJECTIONS]
+    assert caught == [True] * REGEX_VISIBLE_INJECTIONS + [False] * (
+        len(INJECTIONS) - REGEX_VISIBLE_INJECTIONS
+    )
 
 
 def test_status_counts(tmp_path):

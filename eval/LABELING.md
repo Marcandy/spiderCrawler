@@ -51,7 +51,9 @@ the pipeline produces; do not edit it) and `gold.json` (you fill in `labels`).
 
 Items whose `gold.json` has `"synthetic": true` contain instruction-like text inserted by
 `spidercrawler eval-inject`. Label the **original** document (the inserted text changes
-nothing). The eval expects the labels unchanged and the `suspicious_input` flag raised.
+nothing). The eval reports two things separately: whether the output stayed correct (all 8),
+and whether `suspicious_input` fired. Three of the 8 texts are paraphrased so the flag
+regex cannot see them; the flag is expected to miss those, and the report says so.
 
 ## Splits
 
