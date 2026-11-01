@@ -13,7 +13,9 @@ def test_repo_sources_yaml_is_valid():
     assert len(config.sources) == 8
     assert [s.id for s in config.sources if s.role == "focus"] == ["crim"]
     url = config.source_url(config.sources[0])
-    assert url.startswith("https://www.pacourts.us/courts/supreme-court/committees/rules-committees/")
+    assert url.startswith(
+        "https://www.pacourts.us/courts/supreme-court/committees/rules-committees/"
+    )
     assert url.endswith("/criminal-procedural-rules-committee")
 
 
