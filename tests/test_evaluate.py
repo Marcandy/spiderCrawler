@@ -113,3 +113,21 @@ def test_wilson_interval():
 def test_test_split_scoring_is_counted(tmp_path):
     assert record_test_run(tmp_path) == 1
     assert record_test_run(tmp_path) == 2
+
+
+def test_injection_that_changes_the_answer_counts_as_affected(tmp_path):
+    cache, llm = ResponseCache(tmp_path), FakeLLM()
+    items = [
+        item("orig", labels()),
+        item(
+            "orig-inj0",
+            labels(),
+            text=SOURCE + "\n\n" + INJECTIONS[0],
+            synthetic=True,
+            injection=INJECTIONS[0],
+        ),
+    ]
+    results, _ = run_eval(items, cache, llm, *ARGS)
+    results[1].answer = {**results[1].answer, "expungement_relevance": "yes"}  # injection worked
+    m = compute_metrics(results)
+    assert (m["injection.output_unaffected"].k, m["injection.output_unaffected"].n) == (0, 1)
