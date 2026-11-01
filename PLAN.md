@@ -135,7 +135,7 @@ There is no page-edit diffing. The rule-text PDFs already mark what changed: add
 |---|---|---|
 | `fetcher` | redirect-aware robots check, rate limit, request cap, conditional GET | No |
 | `index_parser` | parse the three committee tables into rows (title, links, date column literal, table name) | No |
-| `parse_health` | mark a source `broken` if an expected table heading is missing, or the page parses to zero rows when the last good parse had rows | No |
+| `parse_health` | mark a source `broken` if an expected table heading is missing, the page parses to zero rows when items were known, **more new items appear than the flood limit** (default 10, or 25% of known items), or **rows drop below half** of the last good run. Volume guards are skipped in seed runs, which is how the maintainer accepts such a page | No |
 | `detector` | compare rows to known items by item key; emit `new_item`; record table moves; seed mode | No |
 | `pdf_text` | extract and normalize document text, keep `{+ +}` / `[ ]` markup, compute hash, set `markup_lost` / `no_text` | No |
 | `normalize` | the single shared text normalizer (whitespace, quotes, dashes, PDF spacing glitches) used for hashing and quote matching | No |
@@ -169,7 +169,7 @@ data/
                                 decided_at
   runs/<run_id>.json            started_at, finished_at, sources_checked,
                                 items_found, extractions_made, blocked,
-                                errors, tokens_used, status
+                                errors, tokens_used, rows_seen, status
 ```
 
 IDs are content-derived (hash of item key, URL plus content hash, etc.) so re-running a step is idempotent.
@@ -270,6 +270,7 @@ Every path ends at a human. **Edited output is re-run through the verifier.** An
 | Reads like legal advice | Schema forbids advice, verifier rule 6, digest disclaimer, every item links to source | Unit tests on advice patterns (both persons); eval checks summaries |
 | Reviewer edit launders a blocked item | Edits re-verified; failing edits cannot be approved | Unit test |
 | Silent parser breakage | `parse_health` marks source `broken`, no items emitted | Fixture with renamed headings and fixture with empty tables |
+| Re-keying flood or partial page (site moves its PDFs; page half-loads) | Volume guards: stop and record nothing, fail the run; accept with `run --seed` after checking. Matters because records are append-only | Pipeline tests with all PDFs moved and with 80 rows removed |
 | Lost change markup | `markup_lost` flag on documents, shown to reviewer | Fixture PDF with known underlined additions |
 | Robots check fooled by a redirect | Redirect-aware check on the final host; non-text robots treated as suspect | Unit test with a mocked 302-to-HTML robots response |
 | Runaway cost | Per-run token budget and max 20 extractions per run; stop and log when hit | Unit test on budget |
@@ -481,6 +482,7 @@ Each finding was checked against the first draft. Rows marked *revised* were cha
 | 15 | Rule ids and effective dates are available deterministically from the index row, so the LLM adds little on those fields. | Medium | Use the row as a verifier cross-check (rule 8). README states that the LLM's value is the summary, stage, affected parties, relevance, and substantive judgement, not rule ids. |
 | 16 | `pypdf` drops underline, so additions look like unchanged text. | Medium | `pdfplumber` char-level underline detection; `markup_lost` flag when it fails. |
 | 17 | Only about 5 expungement items exist on the source. | Medium | Pitch changed to criminal procedure rules; expungement is a field. |
+| 18 | If the site moves its PDFs, every item gets a new key and floods the queue; append-only history keeps the duplicates forever. A half-loaded page passes the zero-rows check. | Medium | Volume guards in `parse_health` (decided 2026-11-01): stop and record nothing, accept with `run --seed`. |
 
 **Remaining risks accepted:**
 - Single LLM vendor.

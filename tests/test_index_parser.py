@@ -1,7 +1,8 @@
 from conftest import CRIM_URL, with_empty_tables, with_new_proposed_row, with_renamed_heading
 
+from spidercrawler.config import Guards
 from spidercrawler.index_parser import parse_committee_page
-from spidercrawler.parse_health import check_health
+from spidercrawler.parse_health import check_health, check_volume
 
 EVIDENCE_URL = CRIM_URL.replace(
     "criminal-procedural-rules-committee", "committee-on-rules-of-evidence"
@@ -87,3 +88,37 @@ def test_non_pdf_links_are_ignored_and_key_uses_first_pdf():
     assert row.title == "Order announcing rule 1"
     assert row.doc_urls == ("https://www.pacourts.us/Storage/media/pdfs/20260101/x-ruletext.PDF",)
     assert row.item_key == "/storage/media/pdfs/20260101/x-ruletext.pdf"
+
+
+# -- volume guards -----------------------------------------------------------------
+
+G = Guards()
+
+
+def test_normal_week_passes_volume_guards():
+    assert check_volume(rows=118, new_items=1, known_items=117, previous_rows=117, guards=G).ok
+
+
+def test_flood_by_count():
+    health = check_volume(rows=128, new_items=11, known_items=117, previous_rows=117, guards=G)
+    assert not health.ok and health.reasons[0].startswith("flood: 11 new items")
+    assert "run --seed" in health.reasons[0]
+
+
+def test_flood_by_share_on_a_small_page():
+    assert not check_volume(rows=36, new_items=8, known_items=28, previous_rows=28, guards=G).ok
+    assert check_volume(rows=35, new_items=7, known_items=28, previous_rows=28, guards=G).ok
+
+
+def test_unseeded_new_page_is_a_flood():
+    assert not check_volume(rows=117, new_items=117, known_items=0, previous_rows=None, guards=G).ok
+
+
+def test_drop_in_rows():
+    health = check_volume(rows=40, new_items=0, known_items=117, previous_rows=117, guards=G)
+    assert not health.ok and health.reasons[0].startswith("drop: 40 rows")
+    assert check_volume(rows=59, new_items=0, known_items=117, previous_rows=117, guards=G).ok
+
+
+def test_no_previous_count_means_no_drop_check():
+    assert check_volume(rows=1, new_items=0, known_items=117, previous_rows=None, guards=G).ok

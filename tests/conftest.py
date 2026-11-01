@@ -49,3 +49,20 @@ def with_empty_tables(html: str) -> str:
     import re
 
     return re.sub(r"(?s)<tbody>.*?</tbody>", "<tbody></tbody>", html)
+
+
+def with_moved_pdfs(html: str) -> str:
+    """Every PDF under a new folder: what a site migration looks like (all keys change)."""
+    return html.replace('href="/Storage/media/pdfs/', 'href="/Storage/archive/pdfs/').replace(
+        'href="/storage/rules/', 'href="/storage/archive/rules/'
+    )
+
+
+def without_last_rows(html: str, count: int) -> str:
+    """Drop the last `count` rows (each row sits in its own <tbody>): a partial page."""
+    import re
+
+    bodies = list(re.finditer(r"(?s)<tbody>.*?</tbody>", html))
+    for match in reversed(bodies[-count:]):
+        html = html[: match.start()] + html[match.end() :]
+    return html
