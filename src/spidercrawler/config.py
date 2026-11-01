@@ -27,6 +27,9 @@ class Source(BaseModel):
 class Limits(BaseModel):
     min_delay_seconds: float = Field(default=5, ge=5)
     max_requests_per_run: int = Field(default=30, ge=1, le=30)
+    max_extractions_per_run: int = Field(default=20, ge=0, le=20)
+    max_tokens_per_run: int = Field(default=400_000, ge=0)
+    max_output_tokens: int = Field(default=4_000, ge=256)
 
 
 class Guards(BaseModel):

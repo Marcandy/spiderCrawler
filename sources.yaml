@@ -7,6 +7,9 @@ base_url: https://www.pacourts.us/courts/supreme-court/committees/rules-committe
 limits:
   min_delay_seconds: 5
   max_requests_per_run: 30
+  max_extractions_per_run: 20   # LLM calls per run (PLAN section 6, runaway cost)
+  max_tokens_per_run: 400000    # input + output tokens per run; stop before exceeding
+  max_output_tokens: 4000       # per extraction call
 
 # Volume guards: a page that suddenly shows many "new" items (e.g. the site moved its PDFs)
 # or far fewer rows than last time marks the source broken and records nothing.
