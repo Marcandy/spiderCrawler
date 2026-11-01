@@ -25,15 +25,23 @@ _MONTHS = {
     m: i
     for i, names in enumerate(
         [
-            ("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
-            ("may",), ("jun", "june"), ("jul", "july"), ("aug", "august"),
-            ("sep", "sept", "september"), ("oct", "october"), ("nov", "november"),
+            ("jan", "january"),
+            ("feb", "february"),
+            ("mar", "march"),
+            ("apr", "april"),
+            ("may",),
+            ("jun", "june"),
+            ("jul", "july"),
+            ("aug", "august"),
+            ("sep", "sept", "september"),
+            ("oct", "october"),
+            ("nov", "november"),
             ("dec", "december"),
         ],
         start=1,
     )
     for m in names
-}  # fmt: skip
+}
 _WORD_DATE = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b")
 _NUMERIC_DATE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 

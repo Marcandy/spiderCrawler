@@ -266,17 +266,34 @@ class FakeLLM:
     def parse(self, **kwargs):
         self.calls += 1
         summary = ChangeSummary(
-            is_substantive=True, stage="proposed",
+            is_substantive=True,
+            stage="proposed",
             summary="Rule 632 would refer to persons reporting for jury service and to subdivision (h).",
-            rule_ids=["Rule 632"], effective_date_text=None, affected_parties=[],
-            expungement_relevance="no", confidence="high", abstain_reason=None,
+            rule_ids=["Rule 632"],
+            effective_date_text=None,
+            affected_parties=[],
+            expungement_relevance="no",
+            confidence="high",
+            abstain_reason=None,
             claims=[
-                Claim(field="summary", value="v", evidence_quote="Persons reporting for jury service shall complete and verify the standard"),
-                Claim(field="rule_ids", value="v", evidence_quote="Rule 632. Juror Information Questionnaire."),
+                Claim(
+                    field="summary",
+                    value="v",
+                    evidence_quote="Persons reporting for jury service shall complete and verify the standard",
+                ),
+                Claim(
+                    field="rule_ids",
+                    value="v",
+                    evidence_quote="Rule 632. Juror Information Questionnaire.",
+                ),
             ],
-        )  # fmt: skip
-        return SimpleNamespace(stop_reason="end_turn", stop_details=None, parsed_output=summary,
-                               usage=SimpleNamespace(input_tokens=5000, output_tokens=700))  # fmt: skip
+        )
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            stop_details=None,
+            parsed_output=summary,
+            usage=SimpleNamespace(input_tokens=5000, output_tokens=700),
+        )
 
 
 def test_new_item_is_extracted_verified_and_routed(tmp_path, site):

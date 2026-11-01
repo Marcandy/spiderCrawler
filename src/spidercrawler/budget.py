@@ -28,8 +28,9 @@ class Budget:
 
     @classmethod
     def from_limits(cls, limits: Limits) -> "Budget":
-        return cls(limits.max_extractions_per_run, limits.max_tokens_per_run,
-                   limits.max_output_tokens)  # fmt: skip
+        return cls(
+            limits.max_extractions_per_run, limits.max_tokens_per_run, limits.max_output_tokens
+        )
 
     def try_start(self, source_text: str) -> bool:
         """True if one more extraction fits. Once refused, every later call is refused too."""

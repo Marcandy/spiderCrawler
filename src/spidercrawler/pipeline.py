@@ -247,8 +247,9 @@ def _extract(
         ordered = [docs[u] for u in item.doc_urls]
         source_text = "\n\n".join(d.text for d in ordered)
         prefix = source.rule_prefix if source else "Pa.R.Crim.P."
-        row = RowContext(current_table.get(item.id, item.table), item.title,
-                         item.row_date_literal, prefix)  # fmt: skip
+        row = RowContext(
+            current_table.get(item.id, item.table), item.title, item.row_date_literal, prefix
+        )
         doc_flags = sorted(
             {f for d in ordered for f in ("markup_lost", "no_text") if getattr(d, f)}
         )
@@ -264,18 +265,29 @@ def _extract(
             break
         else:
             try:
-                result = call_model(llm, system, build_user_message(source_text, row), model,
-                                    effort, config.limits.max_output_tokens)  # fmt: skip
+                result = call_model(
+                    llm,
+                    system,
+                    build_user_message(source_text, row),
+                    model,
+                    effort,
+                    config.limits.max_output_tokens,
+                )
             except anthropic.APIError as exc:  # record and keep going; our own bugs still raise
                 errors.append(f"{item.id}: extraction call failed: {exc}")
                 continue
             budget.record(result.input_tokens, result.output_tokens)
         extraction = build_extraction(
-            item.id, source_text,
+            item.id,
+            source_text,
             result or CallResult(None, "no_text: document has no text layer", 0, 0),
-            model=model, effort=effort, prompt_version=prompt_version, row=row,
-            rule_prefix=prefix, document_flags=doc_flags,
-        )  # fmt: skip
+            model=model,
+            effort=effort,
+            prompt_version=prompt_version,
+            row=row,
+            rule_prefix=prefix,
+            document_flags=doc_flags,
+        )
         records.write(extraction)
         made += result is not None
         blocked += extraction.queue_status == "blocked"

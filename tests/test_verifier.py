@@ -16,8 +16,12 @@ subdivision (h)+} and any supplemental questionnaire provided by
 the court.
 This amendment is effective April 1, 2027."""
 
-ROW = RowContext(table="approved", title="Rule 632 is amended", date_literal="April 01, 2027",
-                 rule_prefix="Pa.R.Crim.P.")  # fmt: skip
+ROW = RowContext(
+    table="approved",
+    title="Rule 632 is amended",
+    date_literal="April 01, 2027",
+    rule_prefix="Pa.R.Crim.P.",
+)
 
 Q_SUMMARY = "Persons reporting for jury service shall complete and verify the standard"
 Q_RULE = "Rule 632. Juror Information Questionnaire."
@@ -30,12 +34,21 @@ def claim(field, quote, value="v"):
 
 def make(**kw):
     base = dict(
-        is_substantive=True, stage="adopted",
+        is_substantive=True,
+        stage="adopted",
         summary="Rule 632 now refers to persons reporting for jury service and points to subdivision (h) for the form.",
-        rule_ids=["Rule 632"], effective_date_text="April 1, 2027", affected_parties=[],
-        expungement_relevance="no", confidence="high", abstain_reason=None,
-        claims=[claim("summary", Q_SUMMARY), claim("rule_ids", Q_RULE), claim("effective_date", Q_DATE)],
-    )  # fmt: skip
+        rule_ids=["Rule 632"],
+        effective_date_text="April 1, 2027",
+        affected_parties=[],
+        expungement_relevance="no",
+        confidence="high",
+        abstain_reason=None,
+        claims=[
+            claim("summary", Q_SUMMARY),
+            claim("rule_ids", Q_RULE),
+            claim("effective_date", Q_DATE),
+        ],
+    )
     return ChangeSummary(**{**base, **kw})
 
 
@@ -58,8 +71,13 @@ def test_rule1_relevance_yes_needs_a_claim():
 
 
 def test_rule2_quote_not_in_source():
-    s = make(claims=[claim("summary", "Persons reporting for jury service shall be paid a daily stipend"),
-                     claim("rule_ids", Q_RULE), claim("effective_date", Q_DATE)])  # fmt: skip
+    s = make(
+        claims=[
+            claim("summary", "Persons reporting for jury service shall be paid a daily stipend"),
+            claim("rule_ids", Q_RULE),
+            claim("effective_date", Q_DATE),
+        ]
+    )
     r = run(s)
     assert r.status == "fail" and any("quote not in source" in x for x in r.reasons)
 
@@ -95,9 +113,14 @@ def test_rule2_quote_from_deleted_text_is_flagged_not_failed():
 
 
 def test_rule3_date_literal_must_be_in_its_quote():
-    s = make(effective_date_text="April 1, 2027",
-             claims=[claim("summary", Q_SUMMARY), claim("rule_ids", Q_RULE),
-                     claim("effective_date", "Rule 632. Juror Information Questionnaire.")])  # fmt: skip
+    s = make(
+        effective_date_text="April 1, 2027",
+        claims=[
+            claim("summary", Q_SUMMARY),
+            claim("rule_ids", Q_RULE),
+            claim("effective_date", "Rule 632. Juror Information Questionnaire."),
+        ],
+    )
     assert any(x.startswith("rule 3") for x in run(s).reasons)
 
 

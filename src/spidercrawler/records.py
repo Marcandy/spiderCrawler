@@ -139,10 +139,17 @@ class Extraction(Record):
     created_at: datetime
 
     @staticmethod
-    def make_id(item_id: str, model_id: str, effort: str, prompt_version: str,
-                schema_version: str, input_hash: str) -> str:  # fmt: skip
-        return "ext-" + short_hash(item_id, model_id, effort, prompt_version, schema_version,
-                                   input_hash)  # fmt: skip
+    def make_id(
+        item_id: str,
+        model_id: str,
+        effort: str,
+        prompt_version: str,
+        schema_version: str,
+        input_hash: str,
+    ) -> str:
+        return "ext-" + short_hash(
+            item_id, model_id, effort, prompt_version, schema_version, input_hash
+        )
 
 
 class Review(Record):
