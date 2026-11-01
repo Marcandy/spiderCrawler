@@ -20,6 +20,8 @@ UNDERLINE_MAX_HEIGHT = 2.5  # points; table cell backgrounds are ~15
 UNDERLINE_MIN_WIDTH = 3.0
 LINE_TOLERANCE = 3.0
 _ADJACENT_RUNS = re.compile(re.escape(ADD_CLOSE) + r"(\s*)" + re.escape(ADD_OPEN))
+_PAGE_NUMBER_LINE = re.compile(r"\n[ \t]*(?:-[ \t]*)?\d{1,3}(?:[ \t]*-)?[ \t]*$")
+_PRIVATE_USE = re.compile("[\ue000-\uf8ff]")  # icon-font glyphs, e.g. form checkboxes
 _MARKUP_LEGEND = re.compile(r"\b(bold(ed)?\s+and\s+underlined|underlined)\b", re.IGNORECASE)
 
 Obj = dict[str, Any]
@@ -95,9 +97,13 @@ def extract_pdf_text(data: bytes) -> PdfText:
             any_chars |= bool(chars)
             underlined += count
             bold_bracket |= bracket
-            pages.append(extract_text(chars, x_tolerance=1.5, y_tolerance=LINE_TOLERANCE))
+            page_text = extract_text(chars, x_tolerance=1.5, y_tolerance=LINE_TOLERANCE)
+            # A bare page number as the last line would sit inside any quote that
+            # spans the page break, and the quote would then fail to match.
+            pages.append(_PAGE_NUMBER_LINE.sub("", page_text))
 
-    text = _ADJACENT_RUNS.sub(r"\1", "\n\n".join(pages))
+    text = _PRIVATE_USE.sub("", "\n\n".join(pages))
+    text = _ADJACENT_RUNS.sub(r"\1", text)
     text = normalize(text)
     marks_changes = bool(_MARKUP_LEGEND.search(text)) or bold_bracket
     return PdfText(

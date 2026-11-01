@@ -89,3 +89,19 @@ def test_not_a_pdf_raises():
 def test_extraction_is_deterministic(rule632):
     again = extract_pdf_text((PDFS / "rule632-ruletext.pdf").read_bytes())
     assert content_hash(again.text) == content_hash(rule632.text)
+
+
+def test_page_numbers_are_dropped_so_quotes_span_page_breaks(report702):
+    # Page 3 of the 702 PDF ends "... 18 P.S. § 11.201(5)." then a bare "2".
+    assert (
+        "{+18 P.S. § 11.201(5)+}.\n\nA psychiatric or psychological examination" in report702.text
+    )
+    assert quote_in_source(
+        "18 P.S. § 11.201(5). A psychiatric or psychological examination may be ordered",
+        report702.text,
+    )
+    assert not report702.text.rstrip().endswith("6")
+
+
+def test_private_use_glyphs_are_removed(rule632):
+    assert not any("\ue000" <= ch <= "\uf8ff" for ch in rule632.text)
