@@ -124,7 +124,7 @@ def run_pipeline(
         validators[source.id] = page.validators
         rows_seen[source.id] = len(parsed.rows)
 
-    documents = 0 if cap_hit else _fetch_documents(config, records, fetcher, errors)
+    documents = 0 if cap_hit else fetch_documents(config, records, fetcher, errors)
     extraction_stats = (0, 0, 0)
     if llm is None:
         errors.append("extraction skipped: no LLM client (set ANTHROPIC_API_KEY)")
@@ -165,15 +165,27 @@ def _status(config: Config, broken: list[str], unreachable: list[str], checked: 
     return "ok"
 
 
-def _fetch_documents(
-    config: Config, records: RecordStore, fetcher: Fetcher, errors: list[str]
+def fetch_documents(
+    config: Config,
+    records: RecordStore,
+    fetcher: Fetcher,
+    errors: list[str],
+    wanted: set[str] | None = None,
 ) -> int:
-    """Fetch PDFs for items that need them and lack them. Leftovers wait for the next run."""
+    """Fetch PDFs for items that need them and lack them. Leftovers wait for the next run.
+
+    `wanted` (item ids) overrides the normal rule, e.g. to collect historical eval items.
+    """
     sources = {s.id: s for s in config.sources}
     have = {(d.item_id, d.url) for d in records.iter(Document)}
     fetched = 0
     for item in sorted(records.iter(Item), key=lambda i: i.first_seen_run):
-        if not needs_documents(item, sources.get(item.source_id)):
+        eligible = (
+            (item.id in wanted)
+            if wanted is not None
+            else needs_documents(item, sources.get(item.source_id))
+        )
+        if not eligible:
             continue
         for url in item.doc_urls:
             if (item.id, url) in have:
