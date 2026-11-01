@@ -23,6 +23,7 @@ from spidercrawler.records import PageValidators
 
 MAX_REDIRECTS = 5
 TIMEOUT_SECONDS = 30.0
+MAX_BYTES = 25 * 1024 * 1024  # committee PDFs are well under 1 MB
 
 
 class FetchError(Exception):
@@ -53,7 +54,21 @@ class FetchResult:
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 
-def _is_redirect(resp: httpx.Response) -> bool:
+@dataclass(frozen=True)
+class _Raw:
+    """A fully read, size-capped response."""
+
+    url: str
+    status_code: int
+    headers: httpx.Headers
+    content: bytes
+
+    @property
+    def text(self) -> str:
+        return self.content.decode("utf-8", errors="replace")
+
+
+def _is_redirect(resp: _Raw) -> bool:
     # httpx's Response.is_redirect also counts 304, which is not a redirect here.
     return resp.status_code in REDIRECT_STATUSES and "location" in resp.headers
 
@@ -75,6 +90,9 @@ class _Robots:
         if self._parser is not None:
             return self._parser.can_fetch(user_agent, url)
         return self._allow_all
+
+    def via(self, origin: str) -> "_Robots":
+        return _Robots(self._parser, self._allow_all, f"via {origin}: {self.reason}")
 
 
 class Fetcher:
@@ -103,7 +121,7 @@ class Fetcher:
 
     # -- low level ---------------------------------------------------------------
 
-    def _send(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+    def _send(self, url: str, headers: dict[str, str] | None = None) -> _Raw:
         if self.requests_made >= self.max_requests:
             raise RequestCapError(f"request cap of {self.max_requests} reached")
         origin = _origin(url)
@@ -112,16 +130,24 @@ class Fetcher:
             if wait > 0:
                 self._sleep(wait)
         self.requests_made += 1
+        request = self.client.build_request(
+            "GET", url, headers={"User-Agent": self.user_agent, **(headers or {})}
+        )
         try:
-            return self.client.get(
-                url,
-                headers={"User-Agent": self.user_agent, **(headers or {})},
-                follow_redirects=False,
-            )
+            resp = self.client.send(request, stream=True, follow_redirects=False)
+            try:
+                body = bytearray()
+                for chunk in resp.iter_bytes():
+                    body += chunk
+                    if len(body) > MAX_BYTES:
+                        raise FetchError(f"{url}: response larger than {MAX_BYTES} bytes")
+            finally:
+                resp.close()
         except httpx.HTTPError as exc:
             raise FetchError(f"{url}: {exc}") from exc
         finally:
             self._last_request[origin] = self._clock()
+        return _Raw(str(resp.url), resp.status_code, resp.headers, bytes(body))
 
     # -- robots ------------------------------------------------------------------
 
@@ -137,14 +163,14 @@ class Fetcher:
             resp = self._send(robots_url)
             hops = 0
             while _is_redirect(resp) and hops < MAX_REDIRECTS:
-                resp = self._send(urljoin(str(resp.url), resp.headers["location"]))
+                resp = self._send(urljoin(resp.url, resp.headers["location"]))
                 hops += 1
         except RequestCapError:
             raise
         except (FetchError, KeyError) as exc:
             return _Robots(None, False, f"robots.txt unreachable: {exc}")
 
-        final_origin = _origin(str(resp.url))
+        final_origin = _origin(resp.url)
         if _is_redirect(resp):
             return _Robots(None, False, "robots.txt redirect loop")
         if final_origin != origin:
@@ -153,7 +179,7 @@ class Fetcher:
                 return _Robots(None, False, "robots.txt redirects across hosts twice")
             other = self._robots.get(final_origin) or self._load_robots(final_origin, depth + 1)
             self._robots.setdefault(final_origin, other)
-            return _Robots(other._parser, other._allow_all, f"via {final_origin}: {other.reason}")
+            return other.via(final_origin)
         if resp.status_code in (404, 410):
             return _Robots(None, True, f"no robots.txt ({resp.status_code})")
         content_type = resp.headers.get("content-type", "")
@@ -188,7 +214,7 @@ class Fetcher:
         else:
             raise FetchError(f"too many redirects: {url}")
 
-        if resp.status_code != 304 and not resp.is_success:
+        if resp.status_code != 304 and not 200 <= resp.status_code < 300:
             raise FetchError(f"{url}: HTTP {resp.status_code}")
         return FetchResult(
             url=url,

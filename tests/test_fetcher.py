@@ -207,3 +207,25 @@ def test_refuses_to_run_without_contact_email():
     config = CONFIG.model_copy(update={"contact_email": "CHANGE-ME@example.com"})
     with pytest.raises(ValueError, match="contact email"):
         Fetcher(config)
+
+
+def test_robots_rules_allow_other_paths():
+    robots = "User-agent: *\nDisallow: /private/\n"
+    fetcher, _, _ = make_fetcher(
+        {"https://www.pacourts.us/robots.txt": text(robots), PAGE: html("ok")}
+    )
+    assert fetcher.get(PAGE).content == b"ok"
+
+
+def test_robots_rules_for_our_agent_are_honoured():
+    robots = "User-agent: spiderCrawler\nDisallow: /\n\nUser-agent: *\nAllow: /\n"
+    fetcher, _, _ = make_fetcher({"https://www.pacourts.us/robots.txt": text(robots), PAGE: html()})
+    with pytest.raises(RobotsDisallowedError):
+        fetcher.get(PAGE)
+
+
+def test_oversized_response_is_refused(monkeypatch):
+    monkeypatch.setattr("spidercrawler.fetcher.MAX_BYTES", 10)
+    fetcher, _, _ = make_fetcher({PAGE: html("x" * 11)})
+    with pytest.raises(FetchError, match="larger than"):
+        fetcher.get(PAGE)
