@@ -1,7 +1,18 @@
-node_modules
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+*.egg-info/
 
-# scraper generated files
-data/
+# Local state (records live on the data branch; SQLite is a rebuildable cache)
+/data/
+*.sqlite
+*.sqlite3
 
-# test generated files
-test-data/
+# Env
+.env
