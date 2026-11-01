@@ -8,6 +8,14 @@ limits:
   min_delay_seconds: 5
   max_requests_per_run: 30
 
+# Volume guards: a page that suddenly shows many "new" items (e.g. the site moved its PDFs)
+# or far fewer rows than last time marks the source broken and records nothing.
+# After checking the page, accept it with `spidercrawler run --seed`.
+guards:
+  max_new_items: 10     # more new items than this in one run on one page
+  max_new_ratio: 0.25   # or more than this share of the items already known for the page
+  min_rows_ratio: 0.5   # fewer rows than this share of the last good run
+
 # Contact email for the user agent. Override with SPIDERCRAWLER_CONTACT_EMAIL.
 # Live runs refuse to start while this is the placeholder.
 contact_email: CHANGE-ME@example.com

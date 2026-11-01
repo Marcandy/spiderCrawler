@@ -2,7 +2,13 @@
 
 import httpx
 import pytest
-from conftest import FIXTURES, with_new_proposed_row, with_renamed_heading
+from conftest import (
+    FIXTURES,
+    with_moved_pdfs,
+    with_new_proposed_row,
+    with_renamed_heading,
+    without_last_rows,
+)
 from typer.testing import CliRunner
 
 from spidercrawler.cli import app
@@ -176,3 +182,48 @@ def test_total_outage_fails_the_run(tmp_path, site):
     result = run(site, RecordStore(tmp_path), seed=True)
     assert result.sources_checked == 0
     assert result.status == "failed"
+
+
+def count(store, record_type):
+    return len(list(store.iter(record_type)))
+
+
+def test_moved_pdfs_trip_flood_guard_and_record_nothing(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    items_before = count(store, Item)
+    site.pages[CRIM] = with_moved_pdfs(site.pages[CRIM])
+    result = run(site, store)
+    assert result.status == "failed"
+    assert result.sources_broken == ["crim"]
+    assert result.items_found == 0
+    assert count(store, Item) == items_before  # stop and record nothing
+    assert any("flood: 117 new items" in e for e in result.errors)
+    assert result.rows_seen["crim"] == 117  # baseline kept from the last good run
+
+
+def test_seed_run_accepts_a_page_that_tripped_a_guard(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    site.pages[CRIM] = with_moved_pdfs(site.pages[CRIM])
+    assert run(site, store).status == "failed"
+    accepted = run(site, store, seed=True)
+    assert accepted.status == "ok" and accepted.items_found == 117
+    after = run(site, store)
+    assert after.status == "ok" and after.items_found == 0
+
+
+def test_partial_page_trips_drop_guard(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    site.pages[CRIM] = without_last_rows(site.pages[CRIM], 80)
+    result = run(site, store)
+    assert result.status == "failed"
+    assert any("drop: 37 rows, last good run saw 117" in e for e in result.errors)
+
+
+def test_first_unseeded_run_is_refused_not_flooded(tmp_path, site):
+    result = run(site, RecordStore(tmp_path))
+    assert result.status == "failed"
+    assert result.items_found == 0
+    assert count(RecordStore(tmp_path), Item) == 0

@@ -28,9 +28,19 @@ class Limits(BaseModel):
     max_requests_per_run: int = Field(default=30, ge=1, le=30)
 
 
+class Guards(BaseModel):
+    """Volume guards (PLAN.md section 6). Tripping one marks the source broken; nothing is
+    recorded until the maintainer accepts the page with `run --seed`."""
+
+    max_new_items: int = Field(default=10, ge=1)
+    max_new_ratio: float = Field(default=0.25, gt=0, le=1)
+    min_rows_ratio: float = Field(default=0.5, gt=0, le=1)
+
+
 class Config(BaseModel):
     base_url: HttpUrl
     limits: Limits = Limits()
+    guards: Guards = Guards()
     contact_email: str = PLACEHOLDER_EMAIL
     sources: list[Source]
 

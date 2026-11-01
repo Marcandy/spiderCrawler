@@ -13,7 +13,7 @@ from spidercrawler.detector import KnownItem, detect, load_known
 from spidercrawler.fetcher import Fetcher, FetchError, RequestCapError
 from spidercrawler.index_parser import parse_committee_page
 from spidercrawler.normalize import content_hash
-from spidercrawler.parse_health import check_health
+from spidercrawler.parse_health import check_health, check_volume
 from spidercrawler.pdf_text import PdfError, extract_pdf_text
 from spidercrawler.records import (
     Document,
@@ -47,6 +47,7 @@ def run_pipeline(
     known: dict[str, KnownItem] = load_known(records)
     previous = records.latest_run()
     validators = dict(previous.page_validators) if previous else {}
+    rows_seen = dict(previous.rows_seen) if previous else {}
     errors: list[str] = []
     broken: list[str] = []
     unreachable: list[str] = []
@@ -78,6 +79,19 @@ def run_pipeline(
             continue  # keep old validators so the page is re-read next run
 
         detection = detect(source.id, parsed.rows, known, run_id, seed)
+        if not seed:  # a seed run is how the maintainer accepts a page that tripped a guard
+            volume = check_volume(
+                rows=len(parsed.rows),
+                new_items=len(detection.new_items),
+                known_items=known_here,
+                previous_rows=rows_seen.get(source.id),
+                guards=config.guards,
+            )
+            if not volume.ok:
+                broken.append(source.id)
+                errors.extend(f"{source.id}: broken: {reason}" for reason in volume.reasons)
+                continue  # stop and record nothing for this source
+
         for item in detection.new_items:
             records.write(item)
             known[item.item_key] = KnownItem(item, item.table)
@@ -88,6 +102,7 @@ def run_pipeline(
         )
         found += len(detection.new_items)
         validators[source.id] = page.validators
+        rows_seen[source.id] = len(parsed.rows)
 
     documents = 0 if cap_hit else _fetch_documents(config, records, fetcher, errors)
 
@@ -103,6 +118,7 @@ def run_pipeline(
         requests_made=fetcher.requests_made,
         errors=errors,
         page_validators=validators,
+        rows_seen=rows_seen,
         status=_status(config, broken, unreachable, checked),
     )
     records.write(run)

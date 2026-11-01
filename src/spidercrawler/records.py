@@ -101,6 +101,7 @@ class Run(Record):
     extractions_made: int = 0
     errors: list[str] = Field(default_factory=list)
     page_validators: dict[str, PageValidators] = Field(default_factory=dict)
+    rows_seen: dict[str, int] = Field(default_factory=dict)  # last good row count per source
     status: Literal["ok", "failed"]
 
     @staticmethod
