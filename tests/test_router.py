@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from test_verifier import ROW, SOURCE, make
 
+from spidercrawler.normalize import content_hash
 from spidercrawler.records import Extraction
 from spidercrawler.router import DecisionRefusedError, check_edit, decide, is_publishable, route
 
@@ -28,7 +29,8 @@ def test_routing_table(status, confidence, relevance, queue):
 def extraction(queue="ready_for_review", output=True):
     return Extraction(
         id="ext-1", item_id="item-1", model_id="m", effort="medium", prompt_version="v1",
-        schema_version="1", input_hash="h", output=make().model_dump() if output else None,
+        schema_version="1", input_hash=content_hash(SOURCE),
+        output=make().model_dump() if output else None,
         canonical=None, error=None if output else "refusal",
         verifier_status="pass" if queue != "blocked" else "fail", confidence="high",
         queue_status=queue, created_at=T0,
@@ -94,3 +96,13 @@ def test_newest_review_wins():
 def test_unknown_decision():
     with pytest.raises(DecisionRefusedError):
         decide(extraction(), "publish", "maintainer")
+
+
+def test_edit_verified_against_other_text_is_refused():
+    edited = make().model_dump()
+    edited["claims"][0]["evidence_quote"] = (
+        "Persons reporting for jury service shall be paid a daily stipend"
+    )
+    forged = SOURCE + "\nPersons reporting for jury service shall be paid a daily stipend."
+    with pytest.raises(DecisionRefusedError, match="input_hash"):
+        decide(extraction(), "edit", "maintainer", edited=edited, source_text=forged, row=ROW)

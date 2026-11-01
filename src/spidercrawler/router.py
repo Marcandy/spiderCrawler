@@ -10,6 +10,7 @@ from datetime import datetime
 from pydantic import ValidationError
 
 from spidercrawler.canonical import canonicalize
+from spidercrawler.normalize import content_hash
 from spidercrawler.records import Extraction, QueueStatus, Review, utcnow
 from spidercrawler.schema import ChangeSummary
 from spidercrawler.verifier import RowContext, VerifierResult, verify
@@ -76,6 +77,9 @@ def decide(
     elif decision == "edit":
         if edited is None:
             raise DecisionRefusedError("an edit needs the edited output")
+        if content_hash(source_text) != extraction.input_hash:
+            # Verify against exactly the text the model saw, never a caller-supplied stand-in.
+            raise DecisionRefusedError("source text does not match the extraction's input_hash")
         check = check_edit(edited, source_text, row, rule_prefix)
         if not check.ok:
             raise DecisionRefusedError(
