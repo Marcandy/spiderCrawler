@@ -78,3 +78,15 @@ def test_real_page_seed_then_one_new_row(tmp_path, crim_html):
     assert [i.title for i in result.new_items] == ["Proposed Amendment of Pa.R.Crim.P. 999"]
     assert result.new_items[0].row_date_literal == "January 15, 2027"
     assert not result.new_items[0].seeded
+
+
+def test_joint_item_listed_by_two_committees_does_not_flap(tmp_path):
+    store = RecordStore(tmp_path)
+    save(store, detect("crim", [row("joint", "prior_proposed")], {}, "run-1", seed=True))
+    # Civil lists the same PDF in a different table.
+    civil = detect("civil", [row("joint", "approved")], load_known(store), "run-1", seed=True)
+    assert civil.new_items == [] and civil.events == []
+    # Next run: crim still says prior_proposed, civil still says approved -> no events.
+    known = load_known(store)
+    assert detect("crim", [row("joint", "prior_proposed")], known, "run-2", False).events == []
+    assert detect("civil", [row("joint", "approved")], known, "run-2", False).events == []

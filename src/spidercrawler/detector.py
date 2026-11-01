@@ -38,6 +38,8 @@ def detect(
 ) -> Detection:
     """New keys become items; known keys in a different table become move events.
 
+    Sources are processed in sources.yaml order, so the focus committee owns joint items.
+
     Row order never matters. In seed mode new items are marked `seeded` so they are
     recorded but never sent for extraction.
     """
@@ -65,6 +67,11 @@ def detect(
                     seeded=seed,
                 )
             )
+        elif prior.item.source_id != source_id:
+            # Joint rulemaking: the same PDF is listed by several committees, often in
+            # different tables. Only the committee that first recorded it tracks moves,
+            # otherwise every run would log the item flipping between tables.
+            continue
         elif prior.current_table != row.table:
             result.events.append(
                 ItemEvent(
