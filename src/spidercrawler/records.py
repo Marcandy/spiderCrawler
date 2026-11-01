@@ -110,7 +110,58 @@ class Run(Record):
         return "run-" + started_at.strftime("%Y%m%dT%H%M%S%fZ")
 
 
-RECORD_TYPES: tuple[type[Record], ...] = (Item, ItemEvent, Document, Run)
+VerifierStatus = Literal["pass", "pass_flagged", "fail", "error"]
+QueueStatus = Literal["blocked", "needs_attention", "ready_for_review"]
+
+
+class Extraction(Record):
+    """One extractor call for one item, with the verifier result and queue status."""
+
+    kind: ClassVar[str] = "extractions"
+    item_id: str
+    model_id: str
+    effort: str
+    prompt_version: str
+    schema_version: str
+    input_hash: str  # content hash of the source text the model saw
+    output: dict | None  # ChangeSummary as JSON; None on extraction error
+    canonical: dict | None  # Canonical as JSON
+    error: str | None  # refusal, schema error, ...
+    verifier_status: VerifierStatus
+    verifier_notes: list[str] = Field(default_factory=list)
+    flags: list[str] = Field(default_factory=list)  # suspicious_input, markup_lost, ...
+    confidence: str | None
+    queue_status: QueueStatus
+    input_tokens: int = 0
+    output_tokens: int = 0
+    created_at: datetime
+
+    @staticmethod
+    def make_id(item_id: str, model_id: str, effort: str, prompt_version: str,
+                schema_version: str, input_hash: str) -> str:  # fmt: skip
+        return "ext-" + short_hash(item_id, model_id, effort, prompt_version, schema_version,
+                                   input_hash)  # fmt: skip
+
+
+class Review(Record):
+    """A human decision on an extraction. The newest review for an extraction wins."""
+
+    kind: ClassVar[str] = "reviews"
+    extraction_id: str
+    reviewer: str
+    decision: Literal["approve", "edit", "reject"]
+    edited_output: dict | None = None
+    edited_verifier_status: VerifierStatus | None = None
+    edited_verifier_notes: list[str] = Field(default_factory=list)
+    note: str = ""
+    decided_at: datetime
+
+    @staticmethod
+    def make_id(extraction_id: str, decided_at: datetime) -> str:
+        return f"rev-{extraction_id}-{decided_at.strftime('%Y%m%dT%H%M%S%fZ')}"
+
+
+RECORD_TYPES: tuple[type[Record], ...] = (Item, ItemEvent, Document, Run, Extraction, Review)
 
 
 class RecordConflictError(Exception):

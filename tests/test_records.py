@@ -150,3 +150,40 @@ def test_conflict_detected_even_if_file_appears_after_check(tmp_path, monkeypatc
     with pytest.raises(RecordConflictError):
         store.write(item)
     assert "someone else" in store.path_for("items", item.id).read_text()
+
+
+def test_extraction_and_review_round_trip(tmp_path):
+    from spidercrawler.records import Extraction, Review
+
+    store = RecordStore(tmp_path)
+    ext_id = Extraction.make_id("item-1", "claude-sonnet-5-5", "medium", "v1", "1", "h")
+    ext = Extraction(
+        id=ext_id,
+        item_id="item-1",
+        model_id="claude-sonnet-5-5",
+        effort="medium",
+        prompt_version="v1",
+        schema_version="1",
+        input_hash="h",
+        output=None,
+        canonical=None,
+        error="refusal",
+        verifier_status="error",
+        confidence=None,
+        queue_status="needs_attention",
+        created_at=T0,
+    )
+    review = Review(
+        id=Review.make_id(ext_id, T0),
+        extraction_id=ext_id,
+        reviewer="maintainer",
+        decision="reject",
+        note="model refused",
+        decided_at=T0,
+    )
+    store.write(ext)
+    store.write(review)
+    assert list(store.iter(Extraction)) == [ext]
+    assert list(store.iter(Review)) == [review]
+    # Same inputs give the same id, so a cached re-run is idempotent.
+    assert Extraction.make_id("item-1", "claude-sonnet-5-5", "medium", "v1", "1", "h") == ext_id

@@ -160,13 +160,14 @@ data/
   item_events/<ts>-<item_id>.json   table moves
   documents/<doc_id>.json       item_id, url, fetched_at, etag, content_hash,
                                 text, text_len, markup_lost, no_text
-  extractions/<extraction_id>.json  item_id, model_id, prompt_version,
-                                schema_version, output_json, canonical_json,
-                                verifier_status, verifier_notes, confidence,
-                                input_tokens, output_tokens, created_at
+  extractions/<extraction_id>.json  item_id, model_id, effort, prompt_version,
+                                schema_version, input_hash, output, canonical,
+                                error, verifier_status, verifier_notes, flags,
+                                confidence, queue_status, input_tokens,
+                                output_tokens, created_at
   reviews/<review_id>.json      extraction_id, reviewer, decision,
-                                edited_json, edited_verifier_status, note,
-                                decided_at
+                                edited_output, edited_verifier_status,
+                                edited_verifier_notes, note, decided_at
   runs/<run_id>.json            started_at, finished_at, sources_checked,
                                 items_found, extractions_made, blocked,
                                 errors, tokens_used, rows_seen, status

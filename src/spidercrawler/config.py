@@ -21,6 +21,7 @@ class Source(BaseModel):
     name: str
     slug: str
     role: Literal["focus", "context"]
+    rule_prefix: str = "Pa.R.Crim.P."  # citation set a bare "Rule 632" belongs to
 
 
 class Limits(BaseModel):
