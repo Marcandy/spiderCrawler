@@ -29,6 +29,10 @@ CRIM = "Pa.R.Crim.P."
         ("Proposed Adoption of Pa.R.Crim.P. 579.1", ["Pa.R.Crim.P. 579.1"]),
         ("Replacement with Pa.R.Crim.P. 520.1-520.19", ["Pa.R.Crim.P. 520.1-520.19"]),
         (
+            "Replacement with Pa.R.Crim.P. 520.1-.19",
+            ["Pa.R.Crim.P. 520.1-520.19"],
+        ),  # site shorthand
+        (
             "Amendment of Pa.R.A.P. 1517; Adoption of Pa.R.C.P. 243",
             ["Pa.R.A.P. 1517", "Pa.R.Civ.P. 243"],
         ),

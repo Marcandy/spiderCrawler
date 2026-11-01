@@ -54,10 +54,18 @@ def rule_ids(text: str, default_prefix: str) -> list[str]:
         raw = match.group("prefix")
         prefix = default_prefix if re.fullmatch(_RULE_WORD, raw) else canonical_prefix(raw)
         for num in _ONE_NUM.findall(match.group("nums")):
-            rule = f"{prefix} {re.sub(r'\s+', '', num)}"
+            rule = f"{prefix} {_expand_range(re.sub(r'\s+', '', num))}"
             if rule not in found:
                 found.append(rule)
     return found
+
+
+def _expand_range(num: str) -> str:
+    """'520.1-.19' (shorthand on the site) -> '520.1-520.19', so both spellings match."""
+    start, sep, end = num.partition("-")
+    if sep and end.startswith("."):
+        return f"{start}-{start.split('.')[0]}{end}"
+    return num
 
 
 def parse_date(text: str | None) -> date | None:
