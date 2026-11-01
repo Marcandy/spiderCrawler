@@ -49,6 +49,7 @@ def run_pipeline(
     validators = dict(previous.page_validators) if previous else {}
     errors: list[str] = []
     broken: list[str] = []
+    unreachable: list[str] = []
     checked = 0
     found = 0
     cap_hit = False
@@ -62,6 +63,7 @@ def run_pipeline(
             break
         except FetchError as exc:
             errors.append(f"{source.id}: {exc}")
+            unreachable.append(source.id)
             continue
         checked += 1
         if page.not_modified:
@@ -101,10 +103,21 @@ def run_pipeline(
         requests_made=fetcher.requests_made,
         errors=errors,
         page_validators=validators,
-        status="failed" if broken else "ok",
+        status=_status(config, broken, unreachable, checked),
     )
     records.write(run)
     return run
+
+
+def _status(config: Config, broken: list[str], unreachable: list[str], checked: int) -> str:
+    """Failed if any source is broken, nothing was checked, or the focus source was missed.
+
+    Without the last two, a site outage would produce a green run that monitored nothing.
+    """
+    focus = {s.id for s in config.sources if s.role == "focus"}
+    if broken or checked == 0 or focus & set(unreachable):
+        return "failed"
+    return "ok"
 
 
 def _fetch_documents(

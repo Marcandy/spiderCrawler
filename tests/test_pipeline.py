@@ -134,9 +134,18 @@ def test_runs_in_the_same_second_do_not_collide(tmp_path, site):
 
 
 def test_one_failing_source_does_not_stop_the_others(tmp_path, site):
-    del site.pages[CRIM]  # 404
+    del site.pages[EVID]  # 404 on a context source: others continue, run still ok
     result = run(site, RecordStore(tmp_path), seed=True)
     assert result.status == "ok"
+    assert result.sources_checked == 1
+    assert result.items_found == 117
+    assert any(e.startswith("evidence:") and "404" in e for e in result.errors)
+
+
+def test_unreachable_focus_source_fails_the_run(tmp_path, site):
+    del site.pages[CRIM]
+    result = run(site, RecordStore(tmp_path), seed=True)
+    assert result.status == "failed"
     assert result.sources_checked == 1
     assert result.items_found == 28  # the evidence page lists one PDF twice
     assert any(e.startswith("crim:") and "404" in e for e in result.errors)
@@ -160,3 +169,10 @@ def test_cli_refuses_without_contact_email(tmp_path, monkeypatch):
     result = CliRunner().invoke(app, ["run", "--config", str(sources), "--data-dir", str(tmp_path)])
     assert result.exit_code == 2
     assert "contact email" in result.output
+
+
+def test_total_outage_fails_the_run(tmp_path, site):
+    site.pages.clear()
+    result = run(site, RecordStore(tmp_path), seed=True)
+    assert result.sources_checked == 0
+    assert result.status == "failed"
