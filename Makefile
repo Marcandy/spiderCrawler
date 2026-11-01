@@ -1,4 +1,4 @@
-.PHONY: install lint format test cov run seed eval eval-live eval-test
+.PHONY: install lint format test cov run seed eval eval-live eval-test review
 
 install:
 	uv sync
@@ -32,3 +32,7 @@ eval-live:
 # The frozen test split. Scoring it is counted and shown in every test report.
 eval-test:
 	uv run spidercrawler eval --split test
+
+# uvicorn is pulled in for this command only (not yet a project dependency).
+review:
+	uv run --with uvicorn spidercrawler review
