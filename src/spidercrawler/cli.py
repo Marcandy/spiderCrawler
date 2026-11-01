@@ -26,17 +26,31 @@ def run(
     seed: Annotated[
         bool, typer.Option("--seed", help="Record existing items without extracting them.")
     ] = False,
+    source: Annotated[
+        list[str] | None,
+        typer.Option("--source", help="With --seed: seed only this source (repeatable)."),
+    ] = None,
     config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
     data_dir: DataOpt = Path("data"),
 ) -> None:
     """Fetch every source, detect new items, and store their documents."""
     config = load_config(config_path)
+    known_ids = {s.id for s in config.sources}
+    if source and (not seed or set(source) - known_ids):
+        typer.echo(f"error: --source needs --seed and one of {sorted(known_ids)}", err=True)
+        raise typer.Exit(2)
     try:
         fetcher = Fetcher(config)
     except ValueError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2) from exc
-    result = run_pipeline(config, RecordStore(data_dir), fetcher, seed=seed)
+    result = run_pipeline(
+        config,
+        RecordStore(data_dir),
+        fetcher,
+        seed=seed,
+        seed_only=frozenset(source) if source else None,
+    )
 
     typer.echo(
         f"{result.id}: {result.status} | sources {result.sources_checked}/{len(config.sources)}"

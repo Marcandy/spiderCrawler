@@ -41,7 +41,11 @@ def run_pipeline(
     fetcher: Fetcher,
     seed: bool = False,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    seed_only: frozenset[str] | None = None,
 ) -> Run:
+    """Run every source once. With `seed`, items are recorded without extraction; `seed_only`
+    limits that to the named sources (accepting one tripped page must not swallow a genuinely
+    new item on another)."""
     started = now()
     run_id = Run.make_id(started)
     known: dict[str, KnownItem] = load_known(records)
@@ -78,8 +82,9 @@ def run_pipeline(
             errors.extend(f"{source.id}: broken: {reason}" for reason in health.reasons)
             continue  # keep old validators so the page is re-read next run
 
-        detection = detect(source.id, parsed.rows, known, run_id, seed)
-        if not seed:  # a seed run is how the maintainer accepts a page that tripped a guard
+        seeding = seed and (seed_only is None or source.id in seed_only)
+        detection = detect(source.id, parsed.rows, known, run_id, seeding)
+        if not seeding:  # seeding is how the maintainer accepts a page that tripped a guard
             volume = check_volume(
                 rows=len(parsed.rows),
                 new_items=len(detection.new_items),

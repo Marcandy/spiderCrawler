@@ -73,11 +73,11 @@ class Site:
         return httpx.Response(404)
 
 
-def run(site, store, seed=False, cap=30):
+def run(site, store, seed=False, cap=30, seed_only=None):
     config = make_config(cap)
     client = httpx.Client(transport=httpx.MockTransport(site.handler))
     fetcher = Fetcher(config, client=client, sleep=lambda s: None)
-    return run_pipeline(config, store, fetcher, seed=seed)
+    return run_pipeline(config, store, fetcher, seed=seed, seed_only=seed_only)
 
 
 @pytest.fixture
@@ -227,3 +227,24 @@ def test_first_unseeded_run_is_refused_not_flooded(tmp_path, site):
     assert result.status == "failed"
     assert result.items_found == 0
     assert count(RecordStore(tmp_path), Item) == 0
+
+
+def test_seeding_one_source_does_not_swallow_new_items_elsewhere(tmp_path, site, evidence_html):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    site.pages[CRIM] = with_moved_pdfs(site.pages[CRIM])  # flood on crim
+    site.pages[EVID] = with_new_proposed_row(evidence_html)  # genuinely new item on evidence
+    result = run(site, store, seed=True, seed_only=frozenset({"crim"}))
+    assert result.status == "ok"
+    new_evidence = [
+        i for i in store.iter(Item) if i.first_seen_run == result.id and i.source_id == "evidence"
+    ]
+    assert [i.seeded for i in new_evidence] == [False]  # still eligible for extraction
+
+
+def test_cli_source_requires_seed_and_a_known_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPIDERCRAWLER_CONTACT_EMAIL", "maintainer@example.org")
+    sources = FIXTURES.parent.parent / "sources.yaml"
+    base = ["run", "--config", str(sources), "--data-dir", str(tmp_path)]
+    assert CliRunner().invoke(app, [*base, "--source", "crim"]).exit_code == 2
+    assert CliRunner().invoke(app, [*base, "--seed", "--source", "nope"]).exit_code == 2

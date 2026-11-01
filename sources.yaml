@@ -10,7 +10,7 @@ limits:
 
 # Volume guards: a page that suddenly shows many "new" items (e.g. the site moved its PDFs)
 # or far fewer rows than last time marks the source broken and records nothing.
-# After checking the page, accept it with `spidercrawler run --seed`.
+# After checking the page, accept it with `spidercrawler run --seed --source <id>`.
 guards:
   max_new_items: 10     # more new items than this in one run on one page
   max_new_ratio: 0.25   # or more than this share of the items already known for the page

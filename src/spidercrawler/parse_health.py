@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from spidercrawler.config import Guards
 from spidercrawler.index_parser import EXPECTED_TABLES, ParseResult
 
-ACCEPT_HINT = "if expected, accept the page with `spidercrawler run --seed`"
+ACCEPT_HINT = "if expected, accept the page with `spidercrawler run --seed --source <id>`"
 
 
 @dataclass(frozen=True)
