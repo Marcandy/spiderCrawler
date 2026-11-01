@@ -225,7 +225,7 @@ class Canonical(BaseModel):            # added by canonical.py
 
 ### Verifier rules (plain code)
 
-All text comparisons use `normalize()` on both sides, with `{+`, `+}` markup tokens stripped, so a quote matches whether or not it includes markup.
+All text comparisons use `normalize()` on both sides, with `{+`, `+}` markup tokens stripped, so a quote matches whether or not it includes markup. Matching also ignores letter case and hyphens inside words (decided 2026-11-01): a quote that capitalizes its first word or retypes an all-caps heading is still the same words. Stored and displayed text keep their original case.
 
 The **source text** for an item is the concatenated normalized text of its documents. Rule-text PDFs show the change itself, so quotes are anchored to the change, not to an unrelated snapshot.
 
