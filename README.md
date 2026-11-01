@@ -25,12 +25,3 @@ make install
 make test        # or: make cov
 make lint
 ```
-
-## Run it
-
-```sh
-uv run spidercrawler run --seed   # first run: record existing items, no extraction
-uv run spidercrawler run          # later runs: detect new items
-```
-
-Source access decisions are recorded in [docs/SOURCES.md](docs/SOURCES.md).
