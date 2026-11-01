@@ -1,0 +1,47 @@
+# Pennsylvania Supreme Court rules committee pages (PLAN.md section 3).
+# All pages share one template: Proposed / Approved / Prior Proposed tables.
+# Access record: docs/SOURCES.md
+
+base_url: https://www.pacourts.us/courts/supreme-court/committees/rules-committees/
+
+limits:
+  min_delay_seconds: 5
+  max_requests_per_run: 30
+
+# Contact email for the user agent. Override with SPIDERCRAWLER_CONTACT_EMAIL.
+# Live runs refuse to start while this is the placeholder.
+contact_email: CHANGE-ME@example.com
+
+sources:
+  - id: crim
+    name: Criminal Procedural Rules Committee
+    slug: criminal-procedural-rules-committee
+    role: focus
+  - id: appellate
+    name: Appellate Court Procedural Rules Committee
+    slug: appellate-court-procedural-rules-committee
+    role: context
+  - id: civil
+    name: Civil Procedural Rules Committee
+    slug: civil-procedural-rules-committee
+    role: context
+  - id: evidence
+    name: Committee on Rules of Evidence
+    slug: committee-on-rules-of-evidence
+    role: context
+  - id: domestic
+    name: Domestic Relations Procedural Rules Committee
+    slug: domestic-relations-procedural-rules-committee
+    role: context
+  - id: juvenile
+    name: Juvenile Court Procedural Rules Committee
+    slug: juvenile-court-procedural-rules-committee
+    role: context
+  - id: minor
+    name: Minor Court Rules Committee
+    slug: minor-court-rules-committee
+    role: context
+  - id: orphans
+    name: Orphans' Court Procedural Rules Committee
+    slug: orphans-court-procedural-rules-committee
+    role: context
