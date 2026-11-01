@@ -45,6 +45,7 @@ _RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\s+\+\}"), ADD_CLOSE),  # "text +}" -> "text+}"
 ]
 _ANY_SPACE = re.compile(r"\s+")
+_INTRA_WORD_HYPHEN = re.compile(r"(?<=[A-Za-z])-(?=[A-Za-z])")
 
 
 def normalize(text: str) -> str:
@@ -64,8 +65,13 @@ def strip_markup(text: str) -> str:
 
 
 def for_matching(text: str) -> str:
-    """Form used for quote matching: normalized, markup stripped, all whitespace collapsed."""
-    return _ANY_SPACE.sub(" ", strip_markup(normalize(text))).strip()
+    """Form used for quote matching: normalized, markup stripped, all whitespace collapsed.
+
+    Hyphens inside words are dropped, because `normalize()` joins line-end hyphenation
+    ("non-\nviolent" -> "nonviolent") and a quote may restore the hyphen.
+    """
+    text = _INTRA_WORD_HYPHEN.sub("", strip_markup(normalize(text)))
+    return _ANY_SPACE.sub(" ", text).strip()
 
 
 def quote_in_source(quote: str, source: str) -> bool:

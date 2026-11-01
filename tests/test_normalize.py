@@ -69,3 +69,13 @@ def test_empty_quote_never_matches():
 def test_content_hash_ignores_cosmetic_differences():
     assert content_hash("a  \u201cb\u201d") == content_hash('a "b"')
     assert content_hash("a b") != content_hash("a c")
+
+
+def test_quote_matches_whether_or_not_line_end_hyphen_is_restored():
+    source = normalize("for non-\nviolent offenses")  # stored as "nonviolent"
+    assert quote_in_source("for non-violent offenses", source)
+    assert quote_in_source("for nonviolent offenses", source)
+
+
+def test_number_ranges_keep_their_hyphen_for_matching():
+    assert for_matching("Rules 520-529") == "Rules 520-529"
