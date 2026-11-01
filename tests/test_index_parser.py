@@ -76,3 +76,14 @@ def test_empty_tables_mark_broken_when_items_were_known(crim_html):
 def test_unrelated_html_marks_broken():
     result = parse_committee_page("<html><body><h1>Maintenance</h1></body></html>", CRIM_URL)
     assert len(check_health(result, known_items=0).reasons) == 3
+
+
+def test_non_pdf_links_are_ignored_and_key_uses_first_pdf():
+    html = """<table><caption>Approved Rules</caption><tbody><tr><td>
+      <a href="/news/item">Order announcing rule 1</a>
+      <ul class="rulechanges"><li><a href="/Storage/media/pdfs/20260101/x-ruletext.PDF">Rule text</a></li></ul>
+    </td><td>March 1, 2027</td></tr></tbody></table>"""
+    (row,) = parse_committee_page(html, CRIM_URL).rows
+    assert row.title == "Order announcing rule 1"
+    assert row.doc_urls == ("https://www.pacourts.us/Storage/media/pdfs/20260101/x-ruletext.PDF",)
+    assert row.item_key == "/storage/media/pdfs/20260101/x-ruletext.pdf"
