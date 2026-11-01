@@ -12,8 +12,9 @@ The fetcher also re-checks robots.txt on every run (redirect-aware, see PLAN.md 
 | 2026-11-01 | `GET /robots.txt` | 404, no robots.txt. Allowed by convention. |
 | 2026-11-01 | Terms of use | No terms page found (`/terms-of-use` is 404). Only a translation disclaimer is linked from the homepage. |
 
-Court rules are government edicts and not copyrightable. Committee reports are quoted briefly
-with a link to the source.
+Court rules are treated as government edicts, which US law does not let anyone copyright
+(*Georgia v. Public.Resource.Org*, 2020). Committee reports are quoted only briefly, always with a
+link to the source. This is the maintainer's reading, not legal advice.
 
 Pages: the 8 committee pages listed in `sources.yaml`. Linked PDFs under `/Storage/media/pdfs/`.
 

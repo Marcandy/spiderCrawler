@@ -1,6 +1,7 @@
 """Load and validate sources.yaml."""
 
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +13,7 @@ from spidercrawler import __version__
 PLACEHOLDER_EMAIL = "CHANGE-ME@example.com"
 CONTACT_EMAIL_ENV = "SPIDERCRAWLER_CONTACT_EMAIL"
 DEFAULT_SOURCES_PATH = Path("sources.yaml")
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class Source(BaseModel):
@@ -45,7 +47,7 @@ class Config(BaseModel):
 
     @property
     def has_contact_email(self) -> bool:
-        return self.contact_email != PLACEHOLDER_EMAIL and "@" in self.contact_email
+        return self.contact_email != PLACEHOLDER_EMAIL and bool(_EMAIL.match(self.contact_email))
 
     @property
     def user_agent(self) -> str:

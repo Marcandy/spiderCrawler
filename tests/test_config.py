@@ -43,3 +43,9 @@ def test_duplicate_source_ids_rejected():
     src = {"id": "a", "name": "A", "slug": "a", "role": "focus"}
     with pytest.raises(ValidationError):
         Config.model_validate({"base_url": "https://x.test/", "sources": [src, src]})
+
+
+@pytest.mark.parametrize("email", ["a@", "@b.org", "no-at-sign", "a@b", "a b@c.org"])
+def test_malformed_contact_email_is_rejected(monkeypatch, email):
+    monkeypatch.setenv(CONTACT_EMAIL_ENV, email)
+    assert not load_config(REPO_SOURCES).has_contact_email
