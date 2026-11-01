@@ -133,3 +133,20 @@ def test_rebuild_loads_all_records_and_tracks_current_table(tmp_path):
     conn = rebuild(store, db)
     assert conn.execute("SELECT count(*) FROM items").fetchone()[0] == 1
     conn.close()
+
+
+def test_conflict_detected_even_if_file_appears_after_check(tmp_path, monkeypatch):
+    """Simulate another writer creating the file between our checks."""
+    store = RecordStore(tmp_path)
+    item = make_item()
+    other = make_item(title="Written by someone else")
+    real_link = __import__("os").link
+
+    def racing_link(src, dst):
+        RecordStore(tmp_path).path_for("items", item.id).write_text(other.model_dump_json())
+        return real_link(src, dst)
+
+    monkeypatch.setattr("spidercrawler.records.os.link", racing_link)
+    with pytest.raises(RecordConflictError):
+        store.write(item)
+    assert "someone else" in store.path_for("items", item.id).read_text()

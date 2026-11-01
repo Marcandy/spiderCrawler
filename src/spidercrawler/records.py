@@ -126,17 +126,23 @@ class RecordStore:
         """Write a record. Returns False if an identical record already exists."""
         path = self.path_for(record.kind, record.id)
         payload = record.model_dump(mode="json")
-        if path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Write a temp file, then hard-link it into place. os.link fails if the target
+        # exists, so creation is atomic and can never overwrite (os.replace would).
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, sort_keys=True, ensure_ascii=False)
+                f.write("\n")
+            os.link(tmp, path)
+        except FileExistsError:
             if json.loads(path.read_text(encoding="utf-8")) == payload:
                 return False
-            raise RecordConflictError(f"{record.kind}/{record.id} already exists with other data")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Write to a temp file then rename, so a crash never leaves half a record.
-        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, sort_keys=True, ensure_ascii=False)
-            f.write("\n")
-        os.replace(tmp, path)
+            raise RecordConflictError(
+                f"{record.kind}/{record.id} already exists with other data"
+            ) from None
+        finally:
+            os.unlink(tmp)
         return True
 
     def exists(self, record_type: type[Record], record_id: str) -> bool:
