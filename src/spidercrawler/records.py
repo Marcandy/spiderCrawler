@@ -105,7 +105,8 @@ class Run(Record):
 
     @staticmethod
     def make_id(started_at: datetime) -> str:
-        return "run-" + started_at.strftime("%Y%m%dT%H%M%SZ")
+        # Microseconds: two runs in the same second (a manual re-run, tests) must not collide.
+        return "run-" + started_at.strftime("%Y%m%dT%H%M%S%fZ")
 
 
 RECORD_TYPES: tuple[type[Record], ...] = (Item, ItemEvent, Document, Run)
