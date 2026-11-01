@@ -25,31 +25,39 @@ sources:
     name: Criminal Procedural Rules Committee
     slug: criminal-procedural-rules-committee
     role: focus
+    rule_prefix: Pa.R.Crim.P.
   - id: appellate
     name: Appellate Court Procedural Rules Committee
     slug: appellate-court-procedural-rules-committee
     role: context
+    rule_prefix: Pa.R.A.P.
   - id: civil
     name: Civil Procedural Rules Committee
     slug: civil-procedural-rules-committee
     role: context
+    rule_prefix: Pa.R.Civ.P.
   - id: evidence
     name: Committee on Rules of Evidence
     slug: committee-on-rules-of-evidence
     role: context
+    rule_prefix: Pa.R.E.
   - id: domestic
     name: Domestic Relations Procedural Rules Committee
     slug: domestic-relations-procedural-rules-committee
     role: context
+    rule_prefix: Pa.R.Civ.P.
   - id: juvenile
     name: Juvenile Court Procedural Rules Committee
     slug: juvenile-court-procedural-rules-committee
     role: context
+    rule_prefix: Pa.R.J.C.P.
   - id: minor
     name: Minor Court Rules Committee
     slug: minor-court-rules-committee
     role: context
+    rule_prefix: Pa.R.Civ.P.M.D.J.
   - id: orphans
     name: Orphans' Court Procedural Rules Committee
     slug: orphans-court-procedural-rules-committee
     role: context
+    rule_prefix: Pa.R.O.C.P.

@@ -160,13 +160,14 @@ data/
   item_events/<ts>-<item_id>.json   table moves
   documents/<doc_id>.json       item_id, url, fetched_at, etag, content_hash,
                                 text, text_len, markup_lost, no_text
-  extractions/<extraction_id>.json  item_id, model_id, prompt_version,
-                                schema_version, output_json, canonical_json,
-                                verifier_status, verifier_notes, confidence,
-                                input_tokens, output_tokens, created_at
+  extractions/<extraction_id>.json  item_id, model_id, effort, prompt_version,
+                                schema_version, input_hash, output, canonical,
+                                error, verifier_status, verifier_notes, flags,
+                                confidence, queue_status, input_tokens,
+                                output_tokens, created_at
   reviews/<review_id>.json      extraction_id, reviewer, decision,
-                                edited_json, edited_verifier_status, note,
-                                decided_at
+                                edited_output, edited_verifier_status,
+                                edited_verifier_notes, note, decided_at
   runs/<run_id>.json            started_at, finished_at, sources_checked,
                                 items_found, extractions_made, blocked,
                                 errors, tokens_used, rows_seen, status
@@ -229,12 +230,12 @@ All text comparisons use `normalize()` on both sides, with `{+`, `+}` markup tok
 
 The **source text** for an item is the concatenated normalized text of its documents. Rule-text PDFs show the change itself, so quotes are anchored to the change, not to an unrelated snapshot.
 
-1. Every non-empty field has at least one claim.
-2. Every `evidence_quote` appears in the item's source text. Minimum 8 words for `summary`, `affected_parties`, and `expungement_relevance` claims; minimum 3 words for `rule_ids` and `effective_date` claims.
+1. Every non-empty field has at least one claim. `expungement_relevance` needs one only when it is `yes`: there is nothing to quote for absence.
+2. Every `evidence_quote` appears in the item's source text. Minimum 8 words for `summary`, `affected_parties`, and `expungement_relevance` claims; minimum 3 words for `rule_ids` and `effective_date` claims. A quote that only matches by including bracketed (deleted) text is flagged `quote_from_deleted_text`; it can be a legitimate claim about what was removed, so it flags rather than fails.
 3. `effective_date_text`, if set, appears inside one of its quotes.
 4. Every `rule_ids` literal appears inside one of its quotes.
 5. `abstain_reason` required when relevance is `unsure`.
-6. Summary fails on advice or eligibility patterns: second person ("you should", "you can now", "you are eligible") and third person ("now qualify", "are now eligible", "can now get"). This is a narrow net, not a guarantee; the eval and the reviewer cover the rest.
+6. Summary fails on advice or eligibility patterns: second person ("you should", "you can now", "you are eligible") and third person ("now qualify", "are now eligible", "can now get"), and on more than 60 words. This is a narrow net, not a guarantee; the eval and the reviewer cover the rest.
 7. Source text containing instruction-like patterns ("ignore previous", "you are an AI", "system prompt") sets a `suspicious_input` flag for the reviewer. It does not block on its own.
 8. Cross-check against the index row (deterministic data the LLM did not produce):
    - If the row's date column is an effective date and `canonical.effective_date` differs from it: **fail**.
