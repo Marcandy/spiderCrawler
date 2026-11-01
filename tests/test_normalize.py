@@ -45,7 +45,7 @@ def test_strip_markup():
 
 
 def test_for_matching_collapses_lines_and_markup():
-    assert for_matching("Persons {+reporting+}\nfor   jury") == "Persons reporting for jury"
+    assert for_matching("Persons {+reporting+}\nfor   jury") == "persons reporting for jury"
 
 
 def test_quote_matches_across_pdf_line_breaks_and_markup():
@@ -78,4 +78,23 @@ def test_quote_matches_whether_or_not_line_end_hyphen_is_restored():
 
 
 def test_number_ranges_keep_their_hyphen_for_matching():
-    assert for_matching("Rules 520-529") == "Rules 520-529"
+    assert for_matching("Rules 520-529") == "rules 520-529"
+
+
+def test_quote_matching_ignores_case():
+    source = "(1) shall\ncomplete and verify the standard, confidential juror information"
+    assert quote_in_source(
+        "Complete and verify the standard, confidential juror information", source
+    )
+    heading = "[PRE-SENTENCE INVESTIGATION REPORT] Pre-Sentence Investigation Report."
+    assert quote_in_source("pre-sentence investigation report", heading)
+
+
+def test_case_folding_does_not_loosen_word_matching():
+    source = "The information shall be confidential and limited to use for jury selection"
+    assert not quote_in_source("The information shall be public and limited to use", source)
+    assert not quote_in_source("information confidential shall be", source)
+
+
+def test_normalize_keeps_original_case():
+    assert normalize("PRE-SENTENCE Report") == "PRE-SENTENCE Report"

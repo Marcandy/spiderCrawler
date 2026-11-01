@@ -69,9 +69,11 @@ def for_matching(text: str) -> str:
 
     Hyphens inside words are dropped, because `normalize()` joins line-end hyphenation
     ("non-\nviolent" -> "nonviolent") and a quote may restore the hyphen.
+    Case is folded: a quote that capitalizes its first word, or retypes an all-caps heading,
+    is still the same words. Stored and displayed text keep their original case.
     """
     text = _INTRA_WORD_HYPHEN.sub("", strip_markup(normalize(text)))
-    return _ANY_SPACE.sub(" ", text).strip()
+    return _ANY_SPACE.sub(" ", text).strip().casefold()
 
 
 def quote_in_source(quote: str, source: str) -> bool:
