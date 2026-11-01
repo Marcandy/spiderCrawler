@@ -8,6 +8,8 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+import anthropic
+
 from spidercrawler.budget import Budget
 from spidercrawler.config import Config, Source
 from spidercrawler.detector import KnownItem, detect, load_known
@@ -252,7 +254,7 @@ def _extract(
             try:
                 result = call_model(llm, system, build_user_message(source_text, row), model,
                                     effort, config.limits.max_output_tokens)  # fmt: skip
-            except Exception as exc:  # API errors: record, keep going within budget
+            except anthropic.APIError as exc:  # record and keep going; our own bugs still raise
                 errors.append(f"{item.id}: extraction call failed: {exc}")
                 continue
             budget.record(result.input_tokens, result.output_tokens)

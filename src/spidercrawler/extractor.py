@@ -7,6 +7,7 @@ A refusal, truncation, or schema violation is an extraction error, never partial
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -24,6 +25,12 @@ PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "extract_v1.md"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_EFFORT = "medium"
 OPEN_TAG, CLOSE_TAG = "<source_document>", "</source_document>"
+# Any spelling of our delimiter tags inside data: case, spaces, or the listing tag.
+_TAG_LOOKALIKE = re.compile(r"<\s*/?\s*(source_document|committee_listing)\s*>", re.IGNORECASE)
+
+
+def _neutralize(text: str) -> str:
+    return _TAG_LOOKALIKE.sub(lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"), text)
 
 
 def load_prompt(path: Path = PROMPT_PATH) -> tuple[str, str]:
@@ -33,17 +40,16 @@ def load_prompt(path: Path = PROMPT_PATH) -> tuple[str, str]:
 
 
 def build_user_message(source_text: str, row: RowContext | None) -> str:
-    # The document cannot close our delimiter early: neutralize any tag look-alikes.
-    safe = source_text.replace(OPEN_TAG, "<source-document>").replace(
-        CLOSE_TAG, "</source-document>"
-    )
-    header = ""
+    """Everything from the website goes inside delimiters, including the page listing.
+
+    Data cannot close a delimiter early: any look-alike tag in it is neutralized.
+    """
+    parts = []
     if row is not None:
-        header = (
-            f"Committee page listing (also data): table={row.table!r}, "
-            f"title={row.title!r}, date column={row.date_literal!r}\n\n"
-        )
-    return f"{header}{OPEN_TAG}\n{safe}\n{CLOSE_TAG}"
+        listing = f"table: {row.table}\ntitle: {row.title}\ndate column: {row.date_literal}"
+        parts.append(f"<committee_listing>\n{_neutralize(listing)}\n</committee_listing>")
+    parts.append(f"{OPEN_TAG}\n{_neutralize(source_text)}\n{CLOSE_TAG}")
+    return "\n\n".join(parts)
 
 
 class MessagesAPI(Protocol):
