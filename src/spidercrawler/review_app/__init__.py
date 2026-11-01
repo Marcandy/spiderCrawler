@@ -6,6 +6,7 @@ accept an edit that fails the verifier. Website text is HTML-escaped (Jinja auto
 """
 
 import json
+import secrets
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -20,6 +21,7 @@ from spidercrawler.router import DecisionRefusedError, decide, is_publishable
 from spidercrawler.verifier import RowContext
 
 QUEUE_ORDER = ("blocked", "needs_attention", "ready_for_review")
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "testserver"}
 _templates = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "templates"),
     autoescape=select_autoescape(["html"]),
@@ -28,6 +30,16 @@ _templates = Environment(
 
 def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer") -> FastAPI:
     app = FastAPI(title="spiderCrawler review", docs_url=None, redoc_url=None)
+    # A random token per app instance, required on every POST: another website open in the
+    # same browser cannot forge a decision (CSRF), because it cannot read this page.
+    csrf_token = secrets.token_urlsafe(32)
+
+    @app.middleware("http")
+    async def local_only(request: Request, call_next):
+        # Refuse DNS-rebinding requests: a hostile domain that resolves to 127.0.0.1.
+        if request.url.hostname not in LOCAL_HOSTS:
+            return HTMLResponse("local access only", status_code=403)
+        return await call_next(request)
 
     def latest_extractions() -> dict[str, Extraction]:
         latest: dict[str, Extraction] = {}
@@ -72,6 +84,7 @@ def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer
             publishable=is_publishable(reviews),
             reviewer=reviewer,
             can_approve=ext.queue_status != "blocked" and ext.output is not None,
+            csrf_token=csrf_token,
         )
         return HTMLResponse(html, status_code=status)
 
@@ -101,6 +114,8 @@ def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer
     async def decide_route(extraction_id: str, request: Request):
         ext = find(extraction_id)
         form = {k: v[0] for k, v in parse_qs((await request.body()).decode("utf-8")).items()}
+        if not secrets.compare_digest(form.get("csrf_token", ""), csrf_token):
+            raise HTTPException(403, "missing or wrong form token; reload the page")
         decision = form.get("decision", "")
         edited_text = form.get("edited_json", "")
         _, source_text, row, _ = context(ext)

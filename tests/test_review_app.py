@@ -60,7 +60,14 @@ def setup(tmp_path, output=None, text=SOURCE):
     return store, ext, TestClient(create_app(store, CONFIG))
 
 
-def post(client, ext, **form):
+def token(client, ext):
+    page = client.get(f"/extraction/{ext.id}").text
+    return page.split('name="csrf_token" value="')[1].split('"')[0]
+
+
+def post(client, ext, with_token=True, **form):
+    if with_token:
+        form["csrf_token"] = token(client, ext)
     return client.post(
         f"/extraction/{ext.id}/decide",
         content=urlencode(form),
@@ -144,3 +151,18 @@ def test_reject(tmp_path):
     assert post(client, ext, decision="reject", note="wrong").status_code == 303
     (review,) = list(store.iter(Review))
     assert review.note == "wrong"
+
+
+def test_post_without_token_is_refused(tmp_path):
+    store, ext, client = setup(tmp_path)
+    assert post(client, ext, with_token=False, decision="approve").status_code == 403
+    assert (
+        post(client, ext, with_token=False, decision="approve", csrf_token="guess").status_code
+        == 403
+    )
+    assert list(store.iter(Review)) == []
+
+
+def test_non_local_host_is_refused(tmp_path):
+    _, _, client = setup(tmp_path)
+    assert client.get("/", headers={"host": "evil.example"}).status_code == 403

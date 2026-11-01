@@ -5,7 +5,7 @@
 <p><span class="status {{ ext.queue_status }}">{{ ext.queue_status }}</span>
    verifier <strong>{{ ext.verifier_status }}</strong> · model <code>{{ ext.model_id }}</code> ({{ ext.effort }})
    · prompt <code>{{ ext.prompt_version }}</code> · page table <code>{{ row.table }}</code>, date column {{ row.date_literal or "none" }}</p>
-<p>Sources: {% for d in docs %}<a href="{{ d.url }}" rel="noopener noreferrer">{{ d.url.rsplit('/', 1)[-1] }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+<p>Sources: {% for d in docs %}{% if d.url.startswith("https://") or d.url.startswith("http://") %}<a href="{{ d.url }}" rel="noopener noreferrer">{{ d.url.rsplit('/', 1)[-1] }}</a>{% else %}{{ d.url }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</p>
 
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
@@ -17,6 +17,7 @@
 
 <h2>Decide</h2>
 <form method="post" action="/extraction/{{ ext.id }}/decide">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <p>Reviewer <input name="reviewer" value="{{ reviewer }}"> Note <input name="note" size="50"></p>
   <p><button name="decision" value="approve" {% if not can_approve %}disabled title="Blocked or failed: edit so it passes the verifier"{% endif %}>Approve</button>
      <button name="decision" value="reject">Reject</button>
