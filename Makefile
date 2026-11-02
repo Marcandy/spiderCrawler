@@ -1,4 +1,4 @@
-.PHONY: install lint format test cov run seed eval eval-live eval-test review
+.PHONY: install lint format test cov run seed eval eval-live eval-test review digest
 
 install:
 	uv sync
@@ -36,3 +36,6 @@ eval-test:
 # uvicorn is pulled in for this command only (not yet a project dependency).
 review:
 	uv run --with uvicorn spidercrawler review
+
+digest:
+	uv run spidercrawler digest

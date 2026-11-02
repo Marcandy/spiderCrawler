@@ -242,3 +242,19 @@ def review(
 
     app_ = create_app(RecordStore(data_dir), load_config(config_path), reviewer)
     uvicorn.run(app_, host="127.0.0.1", port=port)
+
+
+@app.command()
+def digest(
+    data_dir: DataOpt = Path("data"),
+    out_dir: Annotated[Path, typer.Option("--out-dir")] = Path("docs/digest"),
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+) -> None:
+    """Build the static digest from approved items only."""
+    from datetime import UTC, datetime
+
+    from spidercrawler.digest import build
+
+    prefixes = {s.id: s.rule_prefix for s in load_config(config_path).sources}
+    entries = build(RecordStore(data_dir), out_dir, datetime.now(UTC), prefixes)
+    typer.echo(f"wrote {out_dir}/index.html and digest.json with {len(entries)} approved item(s)")
