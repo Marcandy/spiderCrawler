@@ -17,8 +17,9 @@ format:
 test:
 	uv run pytest
 
+# CI fails if coverage of src/spidercrawler drops below this floor (92% when set).
 cov:
-	uv run pytest --cov=spidercrawler --cov-report=term-missing
+	uv run pytest --cov=spidercrawler --cov-report=term-missing --cov-fail-under=90
 
 run:
 	uv run spidercrawler run
