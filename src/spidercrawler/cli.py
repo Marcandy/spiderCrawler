@@ -284,3 +284,20 @@ def summary(data_dir: DataOpt = Path("data")) -> None:
     if run.errors:
         lines += ["", "### Errors and notes", ""] + [f"- {e}" for e in run.errors]
     typer.echo("\n".join(lines))
+
+
+@app.command()
+def cache(
+    data_dir: DataOpt = Path("data"),
+    db: Annotated[Path, typer.Option("--db")] = Path(".cache/spidercrawler.sqlite"),
+) -> None:
+    """Rebuild the SQLite query cache from the JSON records (for ad-hoc SQL)."""
+    from spidercrawler.store import rebuild
+
+    conn = rebuild(RecordStore(data_dir), db)
+    counts = {
+        t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
+        for t in ("items", "documents", "extractions", "reviews", "runs")
+    }
+    conn.close()
+    typer.echo(f"rebuilt {db}: " + ", ".join(f"{n} {t}" for t, n in counts.items()))
