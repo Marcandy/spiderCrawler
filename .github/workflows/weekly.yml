@@ -79,7 +79,13 @@ jobs:
             echo "No new records."
           else
             git commit -q -m "Weekly run $(date -u +%Y-%m-%d)"
-            git push origin data
+            # Reviews may have been pushed meanwhile. Records are always new, distinct files,
+            # so rebasing onto them cannot conflict; retry instead of losing this run.
+            for attempt in 1 2 3; do
+              git push origin data && exit 0
+              git pull --rebase origin data
+            done
+            exit 1
           fi
 
       # A broken or unreachable source fails the job so GitHub emails the maintainer.
