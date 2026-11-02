@@ -1,0 +1,53 @@
+name: Publish digest
+
+# Builds the digest from approved items on the `data` branch and deploys it to GitHub Pages.
+# Runs after each weekly run and on demand (`make publish` after pushing reviews).
+# A `push` trigger on `data` would not work: GitHub reads that workflow from the data branch,
+# which holds only records. Requires Pages source set to "GitHub Actions".
+
+on:
+  workflow_run:
+    workflows: ["Weekly run"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the data branch
+        run: |
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth=1 origin data
+            git worktree add data-branch FETCH_HEAD
+          else
+            mkdir -p data-branch/data
+          fi
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run spidercrawler digest --data-dir data-branch/data --out-dir _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
