@@ -11,6 +11,8 @@ dist/
 
 # Local state (records live on the data branch; SQLite is a rebuildable cache)
 /data/
+/data-branch/
+/_site/
 *.sqlite
 *.sqlite3
 

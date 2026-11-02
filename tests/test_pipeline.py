@@ -338,3 +338,15 @@ def test_without_llm_client_extraction_is_skipped_and_logged(tmp_path, site):
     result = run(site, RecordStore(tmp_path), seed=True)
     assert any(e.startswith("extraction skipped") for e in result.errors)
     assert result.status == "ok"
+
+
+def test_summary_command_reports_latest_run(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    out = CliRunner().invoke(app, ["summary", "--data-dir", str(tmp_path)]).output
+    assert "**ok**" in out and "| New items | 141 |" in out and "extraction skipped" in out
+    assert (
+        CliRunner()
+        .invoke(app, ["summary", "--data-dir", str(tmp_path / "empty")])
+        .output.startswith("No runs")
+    )

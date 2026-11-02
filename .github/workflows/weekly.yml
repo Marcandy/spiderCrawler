@@ -1,0 +1,96 @@
+name: Weekly run
+
+# Fetch, detect, extract, verify, route; commit new JSON records to the `data` branch.
+# Needs: repository variable SPIDERCRAWLER_CONTACT_EMAIL (user agent contact) and, for the
+# LLM step, secret ANTHROPIC_API_KEY (without it the run records "extraction skipped").
+
+on:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 13:00 UTC (8 or 9 am Eastern)
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Seed run: record items without extracting"
+        type: boolean
+        default: false
+      source:
+        description: "With seed: only this source id (empty = all)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-run
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the data branch (create it on first run)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth=1 origin data
+            git worktree add data-branch FETCH_HEAD
+            git -C data-branch switch -c data
+          else
+            git worktree add --orphan -b data data-branch
+          fi
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+
+      - name: Run the pipeline
+        id: pipeline
+        env:
+          SPIDERCRAWLER_CONTACT_EMAIL: ${{ vars.SPIDERCRAWLER_CONTACT_EMAIL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SEED: ${{ inputs.seed }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          args=(--data-dir data-branch/data)
+          if [ "$SEED" = "true" ]; then
+            args+=(--seed)
+            if [ -n "$SOURCE" ]; then args+=(--source "$SOURCE"); fi
+          fi
+          set +e
+          uv run spidercrawler run "${args[@]}"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        if: always()
+        run: uv run spidercrawler summary --data-dir data-branch/data >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit new records to the data branch
+        if: always()
+        run: |
+          cd data-branch
+          git add data
+          if git diff --cached --quiet; then
+            echo "No new records."
+          else
+            git commit -q -m "Weekly run $(date -u +%Y-%m-%d)"
+            # Reviews may have been pushed meanwhile. Records are always new, distinct files,
+            # so rebasing onto them cannot conflict; retry instead of losing this run.
+            for attempt in 1 2 3; do
+              git push origin data && exit 0
+              git pull --rebase origin data
+            done
+            exit 1
+          fi
+
+      # A broken or unreachable source fails the job so GitHub emails the maintainer.
+      - name: Fail if the run failed
+        if: steps.pipeline.outputs.exit_code != '0'
+        run: |
+          echo "spidercrawler run exited with ${{ steps.pipeline.outputs.exit_code }}"
+          exit 1

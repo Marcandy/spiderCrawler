@@ -258,3 +258,29 @@ def digest(
     prefixes = {s.id: s.rule_prefix for s in load_config(config_path).sources}
     entries = build(RecordStore(data_dir), out_dir, datetime.now(UTC), prefixes)
     typer.echo(f"wrote {out_dir}/index.html and digest.json with {len(entries)} approved item(s)")
+
+
+@app.command()
+def summary(data_dir: DataOpt = Path("data")) -> None:
+    """Markdown summary of the latest run (used for the GitHub Actions job summary)."""
+    run = RecordStore(data_dir).latest_run()
+    if run is None:
+        typer.echo("No runs recorded yet.")
+        return
+    lines = [
+        f"## spiderCrawler run `{run.id}`: **{run.status}**",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| Seed run | {'yes' if run.seed else 'no'} |",
+        f"| Sources checked | {run.sources_checked} |",
+        f"| Broken sources | {', '.join(run.sources_broken) or 'none'} |",
+        f"| New items | {run.items_found} |",
+        f"| Documents fetched | {run.documents_fetched} |",
+        f"| Requests made | {run.requests_made} |",
+        f"| Extractions | {run.extractions_made} (blocked {run.blocked}) |",
+        f"| Tokens used | {run.tokens_used} |",
+    ]
+    if run.errors:
+        lines += ["", "### Errors and notes", ""] + [f"- {e}" for e in run.errors]
+    typer.echo("\n".join(lines))
