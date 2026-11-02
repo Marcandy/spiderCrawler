@@ -1,10 +1,14 @@
-"""SQLite cache rebuilt from the JSON records. Never committed; safe to delete."""
+"""SQLite cache rebuilt from the JSON records, for ad-hoc queries. Never committed; safe to delete.
+
+The pipeline, review app, and digest read the JSON records directly; this cache exists so the
+maintainer can ask questions with plain SQL (`spidercrawler cache`, then `sqlite3`).
+"""
 
 import json
 import sqlite3
 from pathlib import Path
 
-from spidercrawler.records import Document, Item, ItemEvent, RecordStore, Run
+from spidercrawler.records import Document, Extraction, Item, ItemEvent, RecordStore, Review, Run
 
 SCHEMA = """
 CREATE TABLE items (
@@ -45,6 +49,40 @@ CREATE TABLE runs (
     status TEXT NOT NULL,
     payload TEXT NOT NULL
 );
+CREATE TABLE extractions (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES items(id),
+    model_id TEXT NOT NULL,
+    effort TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    verifier_status TEXT NOT NULL,
+    queue_status TEXT NOT NULL,
+    confidence TEXT,
+    error TEXT,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE TABLE reviews (
+    id TEXT PRIMARY KEY,
+    extraction_id TEXT NOT NULL REFERENCES extractions(id),
+    reviewer TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    edited_verifier_status TEXT,
+    note TEXT NOT NULL,
+    decided_at TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+-- Newest extraction per item with its newest decision: the review queue as SQL.
+CREATE VIEW queue AS
+SELECT e.item_id, e.id AS extraction_id, e.queue_status, e.verifier_status,
+       (SELECT r.decision FROM reviews r WHERE r.extraction_id = e.id
+        ORDER BY r.decided_at DESC LIMIT 1) AS decision
+FROM extractions e
+WHERE e.created_at = (SELECT MAX(e2.created_at) FROM extractions e2 WHERE e2.item_id = e.item_id);
 CREATE VIEW item_current AS
 SELECT i.*,
        COALESCE(
@@ -103,6 +141,45 @@ def rebuild(records: RecordStore, db_path: Path) -> sqlite3.Connection:
                     int(d.no_text),
                 )
                 for d in records.iter(Document)
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO extractions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    e.id,
+                    e.item_id,
+                    e.model_id,
+                    e.effort,
+                    e.prompt_version,
+                    e.schema_version,
+                    e.input_hash,
+                    e.verifier_status,
+                    e.queue_status,
+                    e.confidence,
+                    e.error,
+                    e.input_tokens,
+                    e.output_tokens,
+                    e.created_at.isoformat(),
+                    e.model_dump_json(),
+                )
+                for e in records.iter(Extraction)
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    r.id,
+                    r.extraction_id,
+                    r.reviewer,
+                    r.decision,
+                    r.edited_verifier_status,
+                    r.note,
+                    r.decided_at.isoformat(),
+                    r.model_dump_json(),
+                )
+                for r in records.iter(Review)
             ],
         )
         conn.executemany(

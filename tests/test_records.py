@@ -187,3 +187,31 @@ def test_extraction_and_review_round_trip(tmp_path):
     assert list(store.iter(Review)) == [review]
     # Same inputs give the same id, so a cached re-run is idempotent.
     assert Extraction.make_id("item-1", "claude-sonnet-5-5", "medium", "v1", "1", "h") == ext_id
+
+
+def test_cache_has_extractions_reviews_and_queue_view(tmp_path):
+    from test_verifier import ROW, SOURCE, make
+
+    from spidercrawler.extractor import CallResult, build_extraction
+    from spidercrawler.router import decide
+
+    store = RecordStore(tmp_path / "records")
+    store.write(make_item())
+    ext = build_extraction(
+        make_item().id,
+        SOURCE,
+        CallResult(make().model_dump(mode="json"), None, 5, 6),
+        model="m",
+        effort="medium",
+        prompt_version="v",
+        row=ROW,
+        rule_prefix="Pa.R.Crim.P.",
+        document_flags=[],
+    )
+    store.write(ext)
+    store.write(decide(ext, "approve", "maintainer", now=T0))
+    conn = rebuild(store, tmp_path / "cache.sqlite")
+    row = conn.execute("SELECT queue_status, decision FROM queue").fetchone()
+    assert (row["queue_status"], row["decision"]) == ("ready_for_review", "approve")
+    assert conn.execute("SELECT input_tokens + output_tokens FROM extractions").fetchone()[0] == 11
+    conn.close()

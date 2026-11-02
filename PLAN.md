@@ -1,7 +1,7 @@
 # spiderCrawler v2: PA Criminal Rules Change Monitor
 
 Plan, architecture, AI safety guards, and adversarial review.
-Status: revised 2026-11-01 after a second adversarial review (section 11b). Source access verified. Ready to build Week 1.
+Status: revised 2026-11-01 after a second adversarial review (section 11b). All three milestones' code is built and merged (PRs #30–#53). Open: labeling the eval set, the first scored eval, an external reviewer, and 3 live weekly runs.
 
 ---
 
@@ -175,7 +175,7 @@ data/
 
 IDs are content-derived (hash of item key, URL plus content hash, etc.) so re-running a step is idempotent.
 
-**SQLite (`sqlite3`, no ORM) is a local cache** rebuilt from the JSON files by `store.rebuild()`. It is gitignored and never committed. Queries, the review app, and the digest read from it.
+**SQLite (`sqlite3`, no ORM) is a local query cache** rebuilt from the JSON files by `store.rebuild()` (`spidercrawler cache`). It is gitignored and never committed. The pipeline, review app, and digest read the JSON records directly; the cache is for ad-hoc SQL (tables for every record type plus a `queue` view).
 
 Raw HTML and raw PDFs are not stored. Only parsed rows and normalized document text are.
 
@@ -286,7 +286,7 @@ Every path ends at a human. **Edited output is re-run through the verifier.** An
 ## 7. Automation
 
 - **Schedule:** GitHub Actions weekly cron (Monday morning ET), plus `workflow_dispatch` for manual runs.
-- **Run steps:** check out the `data` branch, `store.rebuild()`, fetch, parse, parse-health, detect, extract PDF text, extract, verify, route, write JSON records, commit new files to `data`.
+- **Run steps:** check out the `data` branch, fetch, parse, parse-health, detect, extract PDF text, extract, verify, route, write JSON records, commit new files to `data`.
 - **First run:** `run --seed` once, manually. It records every existing row and document without extracting. Historical items are covered by the eval, not the live queue.
 - **Storage:** append-only JSON on the `data` branch. Diffable public history; no binary files committed.
 - **Secrets:** `ANTHROPIC_API_KEY` as a GitHub Actions secret. Never in code or logs.
@@ -373,7 +373,7 @@ spiderCrawler/
     pdf_text.py
     canonical.py
     records.py                 (append-only JSON read/write)
-    store.py                   (SQLite cache: schema, rebuild())
+    store.py                   (SQLite query cache: schema, rebuild())
     schema.py
     extractor.py
     verifier.py
@@ -410,19 +410,19 @@ The old Node code is not kept on `main`; see tag `v0-amazon-scraper`.
 
 Scope is capped. The Agentic Engineer course stays the top priority.
 
-**Week 1: deterministic core**
+**Week 1: deterministic core** (done: PRs #30–#40)
 - Tag `v0-amazon-scraper`, clear `main`, set up Python project and CI.
 - Record robots and terms findings in `docs/SOURCES.md` (done once on 2026-11-01; re-verify).
 - normalize, records, store, fetcher, index_parser, parse_health, detector, pdf_text, with fixture-based tests. `run` and `run --seed` wired end to end without the extractor.
 - Message PAX / Code for Philly for a reviewer.
 
-**Week 2: AI layer and eval**
+**Week 2: AI layer and eval** (code done: PRs #41–#48; labeling and first scored run open)
 - `eval/LABELING.md` first. Then label dev and test.
 - Schema, canonical, prompt v1, extractor, verifier, router, budget, with unit tests.
 - Run `make eval` on dev, tune, then score test once. First numbers.
 - Local review app.
 
-**Week 3: automation and write-up**
+**Week 3: automation and write-up** (code done: PRs #50–#53; live runs open)
 - Weekly workflow, `data` branch, seed run, digest, GitHub Pages.
 - `docs/EVAL.md`, `docs/LIMITATIONS.md`, README.
 - Start live runs. Collect 3 weeks before calling it done.

@@ -15,6 +15,7 @@ dist/
 /_site/
 *.sqlite
 *.sqlite3
+/.cache/
 
 # Env
 .env
