@@ -75,8 +75,9 @@ def item_dir(root: Path, split: Split, item_id: str) -> Path:
     return root / split / item_id
 
 
-def export_item(records: RecordStore, item: Item, split: Split, root: Path, rule_prefix: str,
-                table: str) -> Path:  # fmt: skip
+def export_item(
+    records: RecordStore, item: Item, split: Split, root: Path, rule_prefix: str, table: str
+) -> Path:
     """Write input.txt and an unlabeled gold.json. Never overwrites an existing gold file."""
     docs = {d.url: d for d in records.iter(Document) if d.item_id == item.id}
     missing = [u for u in item.doc_urls if u not in docs]
@@ -120,8 +121,9 @@ def make_injection(source_folder: Path, root: Path, split: Split, variant: int) 
         raise ValueError(f"{new_id} already exists")
     folder.mkdir(parents=True)
     (folder / "input.txt").write_text(injected, encoding="utf-8")
-    synthetic = gold.model_copy(update={"id": new_id, "split": split, "synthetic": True,
-                                        "injection": injection})  # fmt: skip
+    synthetic = gold.model_copy(
+        update={"id": new_id, "split": split, "synthetic": True, "injection": injection}
+    )
     (folder / "gold.json").write_text(synthetic.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return folder
 

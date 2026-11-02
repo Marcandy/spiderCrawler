@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ item.title }}{% endblock %}
+{% block body %}
+<h1>{{ item.title }}</h1>
+<p><span class="status {{ ext.queue_status }}">{{ ext.queue_status }}</span>
+   verifier <strong>{{ ext.verifier_status }}</strong> · model <code>{{ ext.model_id }}</code> ({{ ext.effort }})
+   · prompt <code>{{ ext.prompt_version }}</code> · page table <code>{{ row.table }}</code>, date column {{ row.date_literal or "none" }}</p>
+<p>Sources: {% for d in docs %}{% if d.url.startswith("https://") or d.url.startswith("http://") %}<a href="{{ d.url }}" rel="noopener noreferrer">{{ d.url.rsplit('/', 1)[-1] }}</a>{% else %}{{ d.url }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+{% if ext.flags %}<h2>Flags: check these before deciding</h2>
+<ul class="flags">{% for f in ext.flags %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+{% if ext.verifier_notes %}<h2>Verifier reasons</h2>
+<ul class="notes">{% for n in ext.verifier_notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+{% if ext.error %}<p class="error">Extraction error: {{ ext.error }}. Write the output by hand below if needed.</p>{% endif %}
+
+<h2>Decide</h2>
+<form method="post" action="/extraction/{{ ext.id }}/decide">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <p>Reviewer <input name="reviewer" value="{{ reviewer }}"> Note <input name="note" size="50"></p>
+  <p><button name="decision" value="approve" {% if not can_approve %}disabled title="Blocked or failed: edit so it passes the verifier"{% endif %}>Approve</button>
+     <button name="decision" value="reject">Reject</button>
+     <button name="decision" value="edit">Save edit (re-verified)</button></p>
+  <textarea name="edited_json" rows="18">{{ output_json }}</textarea>
+</form>
+
+{% if reviews %}<h2>History</h2><ul>
+{% for r in reviews %}<li>{{ r.decided_at }}: {{ r.decision }} by {{ r.reviewer }}{% if r.note %}: {{ r.note }}{% endif %}</li>{% endfor %}
+</ul><p>Publishable: <strong>{{ "yes" if publishable else "no" }}</strong></p>{% endif %}
+
+<h2>Source text the model saw</h2>
+<pre>{% for d in docs %}{{ d.text }}
+
+{% endfor %}</pre>
+{% endblock %}

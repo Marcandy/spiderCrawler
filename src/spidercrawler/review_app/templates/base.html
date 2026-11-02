@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}Review{% endblock %} · spiderCrawler</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 70rem; padding: 1rem; color: #1b1b1b; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+  .status { font-weight: 600; padding: .1rem .4rem; border-radius: .3rem; }
+  .blocked { background: #fde2e1; } .needs_attention { background: #fff3cd; } .ready_for_review { background: #e2f3e5; }
+  .flags li, .notes li { margin: .2rem 0; }
+  .error { background: #fde2e1; padding: .6rem; border-radius: .3rem; }
+  pre { white-space: pre-wrap; background: #f6f6f6; padding: .6rem; border-radius: .3rem; max-height: 30rem; overflow: auto; }
+  textarea { width: 100%; font-family: ui-monospace, monospace; }
+  .disclaimer { color: #555; font-size: .9rem; }
+</style>
+</head>
+<body>
+<p><a href="/">Queue</a> · <span class="disclaimer">Not legal advice. Every item needs a human decision before it can be published.</span></p>
+{% block body %}{% endblock %}
+</body>
+</html>

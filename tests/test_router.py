@@ -28,13 +28,21 @@ def test_routing_table(status, confidence, relevance, queue):
 
 def extraction(queue="ready_for_review", output=True):
     return Extraction(
-        id="ext-1", item_id="item-1", model_id="m", effort="medium", prompt_version="v1",
-        schema_version="1", input_hash=content_hash(SOURCE),
+        id="ext-1",
+        item_id="item-1",
+        model_id="m",
+        effort="medium",
+        prompt_version="v1",
+        schema_version="1",
+        input_hash=content_hash(SOURCE),
         output=make().model_dump() if output else None,
-        canonical=None, error=None if output else "refusal",
-        verifier_status="pass" if queue != "blocked" else "fail", confidence="high",
-        queue_status=queue, created_at=T0,
-    )  # fmt: skip
+        canonical=None,
+        error=None if output else "refusal",
+        verifier_status="pass" if queue != "blocked" else "fail",
+        confidence="high",
+        queue_status=queue,
+        created_at=T0,
+    )
 
 
 def test_approve_ready_item():
@@ -53,8 +61,15 @@ def test_cannot_approve_failed_extraction():
 
 
 def test_edit_that_passes_unblocks():
-    review = decide(extraction("blocked"), "edit", "maintainer", edited=make().model_dump(),
-                    source_text=SOURCE, row=ROW, now=T0)  # fmt: skip
+    review = decide(
+        extraction("blocked"),
+        "edit",
+        "maintainer",
+        edited=make().model_dump(),
+        source_text=SOURCE,
+        row=ROW,
+        now=T0,
+    )
     assert review.edited_verifier_status == "pass"
     assert is_publishable([review])
 
@@ -81,8 +96,15 @@ def test_edit_with_schema_violation_is_refused():
 
 
 def test_hand_written_extraction_for_failed_model_call():
-    review = decide(extraction("needs_attention", output=False), "edit", "maintainer",
-                    edited=make().model_dump(), source_text=SOURCE, row=ROW, now=T0)  # fmt: skip
+    review = decide(
+        extraction("needs_attention", output=False),
+        "edit",
+        "maintainer",
+        edited=make().model_dump(),
+        source_text=SOURCE,
+        row=ROW,
+        now=T0,
+    )
     assert is_publishable([review])
 
 

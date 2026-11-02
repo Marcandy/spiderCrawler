@@ -110,8 +110,17 @@ def test_prompt_version_tracks_file_content(tmp_path):
 
 def test_build_extraction_verifies_and_routes():
     result = CallResult(make().model_dump(mode="json"), None, 1200, 300)
-    ext = build_extraction("item-1", SOURCE, result, model="m", effort="medium", prompt_version="v",
-                           row=ROW, rule_prefix="Pa.R.Crim.P.", document_flags=[])  # fmt: skip
+    ext = build_extraction(
+        "item-1",
+        SOURCE,
+        result,
+        model="m",
+        effort="medium",
+        prompt_version="v",
+        row=ROW,
+        rule_prefix="Pa.R.Crim.P.",
+        document_flags=[],
+    )
     assert ext.verifier_status == "pass" and ext.queue_status == "ready_for_review"
     assert ext.canonical["rule_ids"] == ["Pa.R.Crim.P. 632"]
 
@@ -121,15 +130,32 @@ def test_build_extraction_blocks_invented_quote():
     bad["claims"][0]["evidence_quote"] = (
         "Persons reporting for jury service shall be paid a daily stipend"
     )
-    ext = build_extraction("item-1", SOURCE, CallResult(bad, None, 1, 1), model="m", effort="medium",
-                           prompt_version="v", row=ROW, rule_prefix="Pa.R.Crim.P.", document_flags=[])  # fmt: skip
+    ext = build_extraction(
+        "item-1",
+        SOURCE,
+        CallResult(bad, None, 1, 1),
+        model="m",
+        effort="medium",
+        prompt_version="v",
+        row=ROW,
+        rule_prefix="Pa.R.Crim.P.",
+        document_flags=[],
+    )
     assert ext.queue_status == "blocked" and any("rule 2" in n for n in ext.verifier_notes)
 
 
 def test_error_result_goes_to_a_human():
-    ext = build_extraction("item-1", SOURCE, CallResult(None, "refusal (cyber)", 10, 0), model="m",
-                           effort="medium", prompt_version="v", row=ROW, rule_prefix="Pa.R.Crim.P.",
-                           document_flags=["markup_lost"])  # fmt: skip
+    ext = build_extraction(
+        "item-1",
+        SOURCE,
+        CallResult(None, "refusal (cyber)", 10, 0),
+        model="m",
+        effort="medium",
+        prompt_version="v",
+        row=ROW,
+        rule_prefix="Pa.R.Crim.P.",
+        document_flags=["markup_lost"],
+    )
     assert (ext.verifier_status, ext.queue_status) == ("error", "needs_attention")
     assert ext.flags == ["markup_lost"]
 

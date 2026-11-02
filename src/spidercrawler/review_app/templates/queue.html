@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Queue{% endblock %}
+{% block body %}
+<h1>Review queue</h1>
+{% if not rows %}<p>No extractions yet.</p>{% else %}
+<table>
+<tr><th>Status</th><th>Item</th><th>Verifier</th><th>Flags</th><th>Decision</th></tr>
+{% for r in rows %}
+<tr>
+  <td><span class="status {{ r.ext.queue_status }}">{{ r.ext.queue_status }}</span></td>
+  <td><a href="/extraction/{{ r.ext.id }}">{{ r.item.title if r.item else r.ext.item_id }}</a></td>
+  <td>{{ r.ext.verifier_status }}</td>
+  <td>{{ r.ext.flags | length }}</td>
+  <td>{{ r.decision or "pending" }}</td>
+</tr>
+{% endfor %}
+</table>
+{% endif %}
+{% endblock %}

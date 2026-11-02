@@ -22,16 +22,31 @@ ARGS = ("claude-sonnet-5-5", "medium", 8000, set(INJECTIONS[:5]))
 
 
 def item(id_, labels, text=SOURCE, synthetic=False, injection=None):
-    gold = GoldItem(id=id_, split="dev", synthetic=synthetic, injection=injection, source_id="crim",
-                    item_id=id_, rule_prefix="Pa.R.Crim.P.",
-                    row=Row(table="proposed", title="Proposed Amendment of Pa.R.Crim.P. 632", date_literal=None),
-                    labels=labels)  # fmt: skip
+    gold = GoldItem(
+        id=id_,
+        split="dev",
+        synthetic=synthetic,
+        injection=injection,
+        source_id="crim",
+        item_id=id_,
+        rule_prefix="Pa.R.Crim.P.",
+        row=Row(
+            table="proposed", title="Proposed Amendment of Pa.R.Crim.P. 632", date_literal=None
+        ),
+        labels=labels,
+    )
     return EvalItem(gold=gold, input_text=text, path=__import__("pathlib").Path("."))
 
 
 def labels(**kw):
-    base = dict(is_substantive=True, stage="proposed", rule_ids=["Pa.R.Crim.P. 632"],
-                effective_date=None, expungement_relevance="no", hard=False)  # fmt: skip
+    base = dict(
+        is_substantive=True,
+        stage="proposed",
+        rule_ids=["Pa.R.Crim.P. 632"],
+        effective_date=None,
+        expungement_relevance="no",
+        hard=False,
+    )
     return Labels(**{**base, **kw})
 
 

@@ -52,9 +52,12 @@ def _parse_row(tr: LexborNode, table: TableName, base_url: str) -> Row | None:
     first = cells[0]
     links = [a for a in first.css("a") if a.attributes.get("href")]
     pdfs = [
-        urljoin(base_url, a.attributes["href"] or "")
+        url
         for a in links
-        if urlsplit(a.attributes["href"] or "").path.lower().endswith(".pdf")
+        if (url := urljoin(base_url, a.attributes["href"] or "")).startswith(
+            ("https://", "http://")
+        )
+        and urlsplit(url).path.lower().endswith(".pdf")
     ]
     main = links[0] if links else None
     title = _text(main) if main is not None else _text(first)

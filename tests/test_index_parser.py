@@ -122,3 +122,10 @@ def test_drop_in_rows():
 
 def test_no_previous_count_means_no_drop_check():
     assert check_volume(rows=1, new_items=0, known_items=117, previous_rows=None, guards=G).ok
+
+
+def test_javascript_links_are_never_documents():
+    html = """<table><caption>Approved Rules</caption><tbody><tr><td>
+      <a href="javascript:alert(1)//x.pdf">Rule 1</a></td><td>March 1, 2027</td></tr></tbody></table>"""
+    (row,) = parse_committee_page(html, CRIM_URL).rows
+    assert row.doc_urls == ()

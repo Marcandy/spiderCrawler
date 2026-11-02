@@ -88,8 +88,9 @@ class ResponseCache:
 
     def put(self, key: str, result: CallResult) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        self._path(key).write_text(json.dumps(result.__dict__, indent=2, sort_keys=True) + "\n",
-                                   encoding="utf-8")  # fmt: skip
+        self._path(key).write_text(
+            json.dumps(result.__dict__, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
 
 
 def call_model(

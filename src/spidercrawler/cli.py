@@ -223,3 +223,22 @@ def eval_cmd(
     (reports_dir / f"{split}.md").write_text(report, encoding="utf-8")
     (reports_dir / f"{split}.json").write_text(results_json(results) + "\n", encoding="utf-8")
     typer.echo(report)
+
+
+@app.command()
+def review(
+    port: Annotated[int, typer.Option(help="Local port.")] = 8000,
+    reviewer: Annotated[str, typer.Option(help="Name recorded on decisions.")] = "maintainer",
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+    data_dir: DataOpt = Path("data"),
+) -> None:
+    """Open the local review page (http://127.0.0.1:PORT). Use `make review`."""
+    try:
+        import uvicorn
+    except ImportError as exc:
+        typer.echo("error: uvicorn is not installed; run `make review`", err=True)
+        raise typer.Exit(2) from exc
+    from spidercrawler.review_app import create_app
+
+    app_ = create_app(RecordStore(data_dir), load_config(config_path), reviewer)
+    uvicorn.run(app_, host="127.0.0.1", port=port)

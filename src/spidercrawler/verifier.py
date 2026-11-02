@@ -74,12 +74,18 @@ def verify(
         by_field.setdefault(claim.field, []).append(claim.evidence_quote)
 
     # Rule 1: every non-empty field has a claim.
-    required = {"summary": True, "rule_ids": bool(summary.rule_ids),
-                "effective_date": bool(summary.effective_date_text),
-                "affected_parties": bool(summary.affected_parties),
-                "expungement_relevance": summary.expungement_relevance == "yes"}  # fmt: skip
-    reasons += [f"rule 1: no claim for {name}" for name, need in required.items()
-                if need and name not in by_field]  # fmt: skip
+    required = {
+        "summary": True,
+        "rule_ids": bool(summary.rule_ids),
+        "effective_date": bool(summary.effective_date_text),
+        "affected_parties": bool(summary.affected_parties),
+        "expungement_relevance": summary.expungement_relevance == "yes",
+    }
+    reasons += [
+        f"rule 1: no claim for {name}"
+        for name, need in required.items()
+        if need and name not in by_field
+    ]
 
     # Rule 2: every quote is in the source and long enough.
     for claim in summary.claims:
