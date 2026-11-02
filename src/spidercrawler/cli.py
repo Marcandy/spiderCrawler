@@ -1,5 +1,6 @@
 """Command line interface: `spidercrawler run [--seed]`."""
 
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -44,18 +45,25 @@ def run(
     except ValueError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2) from exc
+    llm = None
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        import anthropic  # only needed when extracting
+
+        llm = anthropic.Anthropic()
     result = run_pipeline(
         config,
         RecordStore(data_dir),
         fetcher,
         seed=seed,
         seed_only=frozenset(source) if source else None,
+        llm=llm,
     )
 
     typer.echo(
         f"{result.id}: {result.status} | sources {result.sources_checked}/{len(config.sources)}"
         f" | new items {result.items_found} | documents {result.documents_fetched}"
-        f" | requests {result.requests_made}"
+        f" | requests {result.requests_made} | extractions {result.extractions_made}"
+        f" (blocked {result.blocked}, tokens {result.tokens_used})"
     )
     for error in result.errors:
         typer.echo(f"  - {error}", err=True)

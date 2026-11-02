@@ -99,6 +99,8 @@ class Run(Record):
     documents_fetched: int
     requests_made: int
     extractions_made: int = 0
+    blocked: int = 0
+    tokens_used: int = 0
     errors: list[str] = Field(default_factory=list)
     page_validators: dict[str, PageValidators] = Field(default_factory=dict)
     rows_seen: dict[str, int] = Field(default_factory=dict)  # last good row count per source
