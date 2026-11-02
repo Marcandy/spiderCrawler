@@ -12,8 +12,10 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from spidercrawler.canonical import canonicalize
 from spidercrawler.records import Extraction, Item, RecordStore, Review
 from spidercrawler.router import is_publishable
+from spidercrawler.schema import ChangeSummary
 
 _templates = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "digest_templates"),
@@ -27,6 +29,7 @@ class Entry:
     extraction: Extraction
     review: Review
     output: dict  # the reviewer's edit if there was one, else the model's output
+    canonical: dict  # derived from `output`, so an edited rule id or date is what publishes
 
     @property
     def safe_doc_urls(self) -> list[str]:
@@ -40,8 +43,8 @@ class Entry:
             "doc_urls": self.safe_doc_urls,
             "summary": self.output["summary"],
             "stage": self.output["stage"],
-            "rule_ids": (self.extraction.canonical or {}).get("rule_ids", []),
-            "effective_date": (self.extraction.canonical or {}).get("effective_date"),
+            "rule_ids": self.canonical.get("rule_ids", []),
+            "effective_date": self.canonical.get("effective_date"),
             "expungement_relevance": self.output["expungement_relevance"],
             "extraction_id": self.extraction.id,
             "model_id": self.extraction.model_id,
@@ -55,7 +58,7 @@ class Entry:
         }
 
 
-def collect(records: RecordStore) -> list[Entry]:
+def collect(records: RecordStore, rule_prefixes: dict[str, str] | None = None) -> list[Entry]:
     items = {i.id: i for i in records.iter(Item)}
     newest: dict[str, Extraction] = {}
     for ext in records.iter(Extraction):
@@ -74,12 +77,21 @@ def collect(records: RecordStore) -> list[Entry]:
         output = latest.edited_output if latest.decision == "edit" else ext.output
         if output is None:
             continue
-        entries.append(Entry(items[item_id], ext, latest, output))
+        prefix = (rule_prefixes or {}).get(items[item_id].source_id, "Pa.R.Crim.P.")
+        canonical = canonicalize(ChangeSummary.model_validate(output), prefix).model_dump(
+            mode="json"
+        )
+        entries.append(Entry(items[item_id], ext, latest, output, canonical))
     return sorted(entries, key=lambda e: e.review.decided_at, reverse=True)
 
 
-def build(records: RecordStore, out_dir: Path, generated_at: datetime) -> list[Entry]:
-    entries = collect(records)
+def build(
+    records: RecordStore,
+    out_dir: Path,
+    generated_at: datetime,
+    rule_prefixes: dict[str, str] | None = None,
+) -> list[Entry]:
+    entries = collect(records, rule_prefixes)
     out_dir.mkdir(parents=True, exist_ok=True)
     html = _templates.get_template("index.html").render(entries=entries, generated_at=generated_at)
     (out_dir / "index.html").write_text(html, encoding="utf-8")

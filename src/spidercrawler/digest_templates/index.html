@@ -19,7 +19,7 @@
 {% for e in entries %}
 <article>
   <h2>{{ e.item.title }}</h2>
-  <p class="meta">{{ e.output.stage }}{% if e.extraction.canonical and e.extraction.canonical.rule_ids %} · {{ e.extraction.canonical.rule_ids | join(", ") }}{% endif %}{% if e.extraction.canonical and e.extraction.canonical.effective_date %} · effective {{ e.extraction.canonical.effective_date }}{% endif %} · expungement relevance: {{ e.output.expungement_relevance }}</p>
+  <p class="meta">{{ e.output.stage }}{% if e.canonical.rule_ids %} · {{ e.canonical.rule_ids | join(", ") }}{% endif %}{% if e.canonical.effective_date %} · effective {{ e.canonical.effective_date }}{% endif %} · expungement relevance: {{ e.output.expungement_relevance }}</p>
   <p>{{ e.output.summary }}</p>
   <p>Source: {% for u in e.safe_doc_urls %}<a href="{{ u }}" rel="noopener noreferrer">{{ u.rsplit('/', 1)[-1] }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
   <p class="trace">Reviewed by {{ e.review.reviewer }} ({{ e.review.decision }}) on {{ e.review.decided_at.strftime("%Y-%m-%d") }} · model <code>{{ e.extraction.model_id }}</code> · prompt <code>{{ e.extraction.prompt_version }}</code> · verifier {{ e.review.edited_verifier_status or e.extraction.verifier_status }} · records <code>{{ e.item.id }}</code>, <code>{{ e.extraction.id }}</code>, <code>{{ e.review.id }}</code></p>

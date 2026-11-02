@@ -132,3 +132,15 @@ def test_empty_digest(tmp_path):
     store, _ = setup(tmp_path)
     build(store, tmp_path / "site", T0)
     assert "No approved items yet" in (tmp_path / "site" / "index.html").read_text()
+
+
+def test_reviewer_corrections_to_rule_ids_and_date_are_what_publishes(tmp_path):
+    store, ext = setup(tmp_path)
+    edited = make(rule_ids=["Rule 632"], effective_date_text=None).model_dump(mode="json")
+    edited["claims"] = [c for c in edited["claims"] if c["field"] != "effective_date"]
+    review(store, ext, "edit", edited=edited)
+    out = tmp_path / "site"
+    build(store, out, T0, {"crim": "Pa.R.Crim.P."})
+    (entry,) = json.loads((out / "digest.json").read_text())["entries"]
+    assert entry["effective_date"] is None  # model said 2027-04-01; the reviewer removed it
+    assert "effective 2027-04-01" not in (out / "index.html").read_text()
