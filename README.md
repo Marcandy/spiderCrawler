@@ -6,7 +6,7 @@ structured summary where every claim quotes the source, blocks unsupported claim
 automatically, and publishes nothing until a person approves it.
 
 > **Status (2026-11-01):** pipeline, verifier, review app, digest, and eval harness are built
-> and tested (250 offline tests). **No eval results yet** and **no external reviewer yet**.
+> and covered by an offline test suite. **No eval results yet** and **no external reviewer yet**.
 > See [docs/EVAL.md](docs/EVAL.md) and [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 > Not legal advice.
 
@@ -41,7 +41,7 @@ The LLM is one step out of twelve. Everything around it is deterministic, tested
 |---|---|
 | Model invents facts | Quote-backed claims, checked in code against the source |
 | Real quote, wrong claim | Mandatory human review; measured as "supported but wrong" |
-| Reads like legal advice | Schema and verifier reject advice phrasing; disclaimer and source link on every item |
+| Reads like legal advice | The prompt forbids advice; the verifier rejects common advice and eligibility phrasing (a narrow net); disclaimer and source link on every item |
 | Prompt injection in source text | No tools, schema-only output, delimited data, flag for the reviewer, human gate |
 | Parser breakage or site migration | Health and volume guards stop the source; nothing is recorded until a person accepts |
 | Runaway cost | 20 extractions and a token budget per run; fails closed |
