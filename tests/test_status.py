@@ -80,7 +80,7 @@ def test_healthy_week_counts_new_items_but_not_seeded_history(tmp_path):
     status = monitoring_status(store, SOURCES, NOW)
     assert status.healthy
     assert status.headline == (
-        "Checked 2026-11-09: 1 new criminal-rule item(s) in the last 7 days. 1 awaiting human review."
+        "Checked 2026-11-09: 1 new criminal-rule item in the last 7 days. 1 item awaiting human review."
     )
     assert (status.tracked_items, status.awaiting_extraction, status.monitoring_since) == (
         1,
@@ -93,7 +93,7 @@ def test_quiet_week_says_so(tmp_path):
     store = RecordStore(tmp_path)
     add_run(store, NOW - timedelta(hours=2))
     assert monitoring_status(store, SOURCES, NOW).headline == (
-        "Checked 2026-11-09: 0 new criminal-rule item(s) in the last 7 days."
+        "Checked 2026-11-09: 0 new criminal-rule items in the last 7 days."
     )
 
 
@@ -153,7 +153,16 @@ def test_digest_shows_status_but_never_unreviewed_content(tmp_path):
     out = tmp_path / "site"
     build(store, out, NOW, {"crim": "Pa.R.Crim.P."}, SOURCES)
     html = (out / "index.html").read_text()
-    assert "1 awaiting human review" in html and "8 of 8 committee pages" in html
+    assert "1 item awaiting human review" in html and "8 of 8 committee pages" in html
     assert "Secret pending item" not in html
     assert "Secret pending item" not in (out / "digest.json").read_text()
     assert '"healthy": true' in (out / "digest.json").read_text()
+
+
+def test_page_carries_last_success_for_the_client_side_staleness_check(tmp_path):
+    store = RecordStore(tmp_path)
+    add_run(store, NOW - timedelta(hours=2))
+    build(store, tmp_path / "site", NOW, {}, SOURCES)
+    html = (tmp_path / "site" / "index.html").read_text()
+    assert f'data-last-ok="{(NOW - timedelta(hours=2)).isoformat()}"' in html
+    assert 'class="stale-warning" hidden' in html and "8 * 24 * 3600 * 1000" in html

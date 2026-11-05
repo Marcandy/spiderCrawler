@@ -42,6 +42,10 @@ class MonitoringStatus:
         return data
 
 
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def _day(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%d")
 
@@ -105,11 +109,13 @@ def monitoring_status(
         )
     else:
         headline = (
-            f"Checked {_day(last.started_at)}: {len(recent)} new criminal-rule "
-            f"item(s) in the last 7 days."
+            f"Checked {_day(last.started_at)}: "
+            f"{_count(len(recent), 'new criminal-rule item')} in the last 7 days."
         )
     if awaiting_extraction or awaiting_review:
-        headline += f" {awaiting_extraction + awaiting_review} awaiting human review."
+        headline += (
+            f" {_count(awaiting_extraction + awaiting_review, 'item')} awaiting human review."
+        )
 
     return MonitoringStatus(
         headline=headline,
