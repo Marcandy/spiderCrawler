@@ -255,8 +255,9 @@ def digest(
 
     from spidercrawler.digest import build
 
-    prefixes = {s.id: s.rule_prefix for s in load_config(config_path).sources}
-    entries = build(RecordStore(data_dir), out_dir, datetime.now(UTC), prefixes)
+    config = load_config(config_path)
+    prefixes = {s.id: s.rule_prefix for s in config.sources}
+    entries = build(RecordStore(data_dir), out_dir, datetime.now(UTC), prefixes, config.sources)
     typer.echo(f"wrote {out_dir}/index.html and digest.json with {len(entries)} approved item(s)")
 
 
