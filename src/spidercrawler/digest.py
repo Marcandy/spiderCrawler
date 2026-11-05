@@ -13,9 +13,11 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from spidercrawler.canonical import canonicalize
+from spidercrawler.config import Source
 from spidercrawler.records import Extraction, Item, RecordStore, Review
 from spidercrawler.router import is_publishable
 from spidercrawler.schema import ChangeSummary
+from spidercrawler.status import monitoring_status
 
 _templates = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "digest_templates"),
@@ -90,11 +92,19 @@ def build(
     out_dir: Path,
     generated_at: datetime,
     rule_prefixes: dict[str, str] | None = None,
+    sources: list[Source] | None = None,
 ) -> list[Entry]:
     entries = collect(records, rule_prefixes)
+    status = monitoring_status(records, sources or [], generated_at)
     out_dir.mkdir(parents=True, exist_ok=True)
-    html = _templates.get_template("index.html").render(entries=entries, generated_at=generated_at)
+    html = _templates.get_template("index.html").render(
+        entries=entries, generated_at=generated_at, status=status
+    )
     (out_dir / "index.html").write_text(html, encoding="utf-8")
-    payload = {"generated_at": generated_at.isoformat(), "entries": [e.as_json() for e in entries]}
+    payload = {
+        "generated_at": generated_at.isoformat(),
+        "status": status.as_json(),
+        "entries": [e.as_json() for e in entries],
+    }
     (out_dir / "digest.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return entries

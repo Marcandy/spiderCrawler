@@ -7,6 +7,11 @@
 <style>
   body { font: 16px/1.55 system-ui, sans-serif; margin: 0 auto; max-width: 46rem; padding: 1.5rem 1rem; color: #1b1b1b; background: #fff; }
   .disclaimer { background: #fff3cd; padding: .75rem 1rem; border-radius: .4rem; }
+  .status { padding: .75rem 1rem; border-radius: .4rem; border: 1px solid #ccc; }
+  .status.healthy { border-color: #9ccc9f; background: #eef8ef; }
+  .status.unhealthy { border-color: #e0a0a0; background: #fdeeee; }
+  .status dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: .5rem 0 0; font-size: .9rem; }
+  .status dt { color: #555; }
   article { border-top: 1px solid #ddd; padding: 1rem 0; }
   .meta, .trace { color: #555; font-size: .9rem; }
   .trace code { font-size: .8rem; }
@@ -15,6 +20,30 @@
 <body>
 <h1>Pennsylvania criminal procedure rule changes</h1>
 <p class="disclaimer"><strong>Not legal advice.</strong> These summaries describe what changed in court rules, drafted by an AI model and checked by a person. They do not say who is eligible for anything. Always read the linked source document.</p>
+<section class="status {{ 'healthy' if status.healthy else 'unhealthy' }}" aria-label="Monitoring status"
+         data-last-ok="{{ status.last_ok_run_at.isoformat() if status.last_ok_run_at else '' }}">
+  <strong>{{ status.headline }}</strong>
+  <p class="stale-warning" hidden><strong>This page may be out of date:</strong> no successful check in over 8 days by your clock. The monitor may have stopped.</p>
+  {% if status.last_run_at %}
+  <dl>
+    <dt>Last check</dt><dd>{{ status.last_run_at.strftime("%Y-%m-%d") }} ({{ status.last_run_status }}), {{ status.sources_checked }} of {{ status.sources_total }} committee pages{% if status.broken_sources %}; broken: {{ status.broken_sources | join(", ") }}{% endif %}</dd>
+    <dt>Monitoring since</dt><dd>{{ status.monitoring_since.strftime("%Y-%m-%d") }}</dd>
+    <dt>New criminal-rule items</dt><dd>{{ status.tracked_items }} detected: {{ status.approved }} approved, {{ status.awaiting_review + status.awaiting_extraction }} awaiting review, {{ status.rejected }} not published</dd>
+  </dl>
+  {% endif %}
+</section>
+<script>
+  // The page is static: if the weekly job stops, nothing rebuilds it. Checking against the
+  // visitor's clock keeps a stopped monitor from looking healthy forever.
+  (function () {
+    var box = document.querySelector(".status");
+    var lastOk = Date.parse(box.dataset.lastOk || "");
+    if (isNaN(lastOk) || Date.now() - lastOk > 8 * 24 * 3600 * 1000) {
+      box.querySelector(".stale-warning").hidden = false;
+      box.className = "status unhealthy";
+    }
+  })();
+</script>
 <p class="meta">Generated {{ generated_at.strftime("%Y-%m-%d %H:%M UTC") }} · {{ entries | length }} approved item(s) · Source: Pennsylvania Supreme Court rules committee pages.</p>
 {% for e in entries %}
 <article>
