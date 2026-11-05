@@ -74,6 +74,11 @@ jobs:
         if: always()
         run: |
           cd data-branch
+          # A refused or crashed run may write no records at all; that is not a git error.
+          if [ ! -d data ]; then
+            echo "No records written."
+            exit 0
+          fi
           git add data
           if git diff --cached --quiet; then
             echo "No new records."
