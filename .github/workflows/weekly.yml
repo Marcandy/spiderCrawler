@@ -1,8 +1,9 @@
 name: Weekly run
 
 # Fetch, detect, extract, verify, route; commit new JSON records to the `data` branch.
-# Needs: repository variable SPIDERCRAWLER_CONTACT_EMAIL (user agent contact) and, for the
-# LLM step, secret ANTHROPIC_API_KEY (without it the run records "extraction skipped").
+# Needs: secret SPIDERCRAWLER_CONTACT_EMAIL (user agent contact; a secret, not a variable,
+# because this repository's Actions logs are public and variables are printed in them) and,
+# for the LLM step, secret ANTHROPIC_API_KEY (without it the run records "extraction skipped").
 
 on:
   schedule:
@@ -52,7 +53,7 @@ jobs:
       - name: Run the pipeline
         id: pipeline
         env:
-          SPIDERCRAWLER_CONTACT_EMAIL: ${{ vars.SPIDERCRAWLER_CONTACT_EMAIL }}
+          SPIDERCRAWLER_CONTACT_EMAIL: ${{ secrets.SPIDERCRAWLER_CONTACT_EMAIL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SEED: ${{ inputs.seed }}
           SOURCE: ${{ inputs.source }}
