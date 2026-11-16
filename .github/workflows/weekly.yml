@@ -50,6 +50,18 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
 
+      # Offline checks. A missing secret or a missing seed run stops here, with an annotation
+      # that names what to add and where, before any request is made.
+      - name: Preflight
+        env:
+          SPIDERCRAWLER_CONTACT_EMAIL: ${{ secrets.SPIDERCRAWLER_CONTACT_EMAIL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          args=(--data-dir data-branch/data --github)
+          if [ "$SEED" != "true" ]; then args+=(--live); fi
+          uv run spidercrawler doctor "${args[@]}"
+
       - name: Run the pipeline
         id: pipeline
         env:
