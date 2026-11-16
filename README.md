@@ -78,6 +78,19 @@ make review                         # local review page at http://127.0.0.1:8000
 make digest                         # docs/digest/ from approved items
 ```
 
+### First-time setup
+
+Four steps, in this order. `uv run spidercrawler doctor` shows which are still missing.
+
+1. Add the repository secret `SPIDERCRAWLER_CONTACT_EMAIL`
+   (Settings → Secrets and variables → Actions → Secrets). It goes in the user agent. It is
+   a secret, not a variable, because this repository's Actions logs are public.
+2. Enable Pages: Settings → Pages → Source: **GitHub Actions**.
+3. Run the **Weekly run** workflow once by hand with `seed: true`. It records the existing
+   items as history and creates the `data` branch. Scheduled runs refuse to start before it.
+4. Add the repository secret `ANTHROPIC_API_KEY`. Without it, runs record
+   "extraction skipped".
+
 In production the weekly workflow commits records to the `data` branch; review with
 `make data-checkout`, `make review DATA_DIR=data-branch/data`, `make data-push`, `make publish`.
 Source access decisions are recorded in [docs/SOURCES.md](docs/SOURCES.md).
