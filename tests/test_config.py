@@ -49,3 +49,20 @@ def test_duplicate_source_ids_rejected():
 def test_malformed_contact_email_is_rejected(monkeypatch, email):
     monkeypatch.setenv(CONTACT_EMAIL_ENV, email)
     assert not load_config(REPO_SOURCES).has_contact_email
+
+
+def test_contact_email_with_trailing_newline_is_stripped(monkeypatch):
+    # Regression: "a@b.org\n" was accepted, made an illegal User-Agent header, and httpx
+    # quoted that header (email included) in the error stored in the public run record.
+    monkeypatch.setenv(CONTACT_EMAIL_ENV, "maintainer@example.org\n")
+    config = load_config(REPO_SOURCES)
+    assert config.has_contact_email
+    assert config.user_agent.endswith("; maintainer@example.org)")
+
+
+@pytest.mark.parametrize("email", ["a@b.org\n", "a@b.org\x00", "\u00e9@b.org", " a@b.org"])
+def test_email_that_cannot_be_a_header_value_is_rejected(email):
+    config = Config.model_validate(
+        {"base_url": "https://x.test/", "sources": [], "contact_email": email}
+    )
+    assert not config.has_contact_email
