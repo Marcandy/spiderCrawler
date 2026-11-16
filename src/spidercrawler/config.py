@@ -70,7 +70,8 @@ class Config(BaseModel):
 
     @property
     def has_contact_email(self) -> bool:
-        return self.contact_email != PLACEHOLDER_EMAIL and bool(_EMAIL.fullmatch(self.contact_email))
+        email = self.contact_email
+        return email != PLACEHOLDER_EMAIL and bool(_EMAIL.fullmatch(email))
 
     @property
     def user_agent(self) -> str:
