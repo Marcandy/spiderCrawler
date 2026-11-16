@@ -71,6 +71,30 @@ def run(
         raise typer.Exit(1)
 
 
+@app.command()
+def doctor(
+    live: Annotated[
+        bool, typer.Option("--live", help="Check readiness for a non-seed run (needs a seed run).")
+    ] = False,
+    github: Annotated[
+        bool, typer.Option("--github", help="Also print GitHub Actions annotations.")
+    ] = False,
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+    data_dir: DataOpt = Path("data"),
+) -> None:
+    """Offline preflight: what is missing before a run, with a one-line fix for each."""
+    from spidercrawler.doctor import blocked, run_checks
+
+    checks = run_checks(config_path, data_dir, live=live)
+    for check in checks:
+        typer.echo(check.line())
+        if github and (annotation := check.annotation()):
+            typer.echo(annotation)
+    if blocked(checks):
+        typer.echo("not ready: fix the items marked missing", err=True)
+        raise typer.Exit(1)
+
+
 EvalDirOpt = Annotated[Path, typer.Option("--eval-dir", help="Eval items root.")]
 
 
