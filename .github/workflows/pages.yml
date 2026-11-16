@@ -49,5 +49,21 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Without this, a repository with Pages off fails in the deploy step with a bare 404.
+      - name: Check that Pages is enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if out=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .build_type 2>&1); then
+            if [ "$out" != "workflow" ]; then
+              echo "::error title=Pages source::Pages builds from a branch. Set Settings → Pages → Source: GitHub Actions."
+              exit 1
+            fi
+          elif [[ "$out" == *"HTTP 404"* ]]; then
+            echo "::error title=Pages is not enabled::Enable Pages: Settings → Pages → Source: GitHub Actions. Then run this workflow again."
+            exit 1
+          else
+            echo "::warning title=Pages check::Could not read the Pages settings; deploying anyway."
+          fi
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
