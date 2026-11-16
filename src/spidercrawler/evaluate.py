@@ -264,6 +264,8 @@ def render_report(
     model: str,
     effort: str,
     test_runs: int,
+    freeze_note: str | None = None,
+    agreement: str | None = None,
 ) -> str:
     _, version = load_prompt()
     tokens_in = sum(r.input_tokens for r in results)
@@ -284,6 +286,8 @@ def render_report(
         lines.append(
             f"- Test split scored {test_runs} time(s). Numbers are only clean on the first."
         )
+    if freeze_note:
+        lines.append(f"- {freeze_note}")
     lines += ["", "| Metric | Result |", "|---|---|"]
     lines += [f"| {name} | {metric} |" for name, metric in metrics.items()]
     wrong = [r for r in results if not r.synthetic and r.really_wrong][:5]
@@ -295,6 +299,8 @@ def render_report(
                 f"- `{r.id}`: wrong {bad or '-'}; unsupported claims {r.unsupported_claims}; "
                 f"queue `{r.queue_status}`"
             )
+    if agreement:
+        lines += ["", "## Label agreement", "", agreement]
     return "\n".join(lines) + "\n"
 
 
