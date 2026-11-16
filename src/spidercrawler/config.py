@@ -13,7 +13,9 @@ from spidercrawler import __version__
 PLACEHOLDER_EMAIL = "CHANGE-ME@example.com"
 CONTACT_EMAIL_ENV = "SPIDERCRAWLER_CONTACT_EMAIL"
 DEFAULT_SOURCES_PATH = Path("sources.yaml")
-_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Printable ASCII only, no spaces: the email goes into the User-Agent header. Anything else
+# is an illegal header value, and httpx quotes the whole header in the error it raises.
+_EMAIL = re.compile(r"[!-?A-~]+@[!-?A-~]+\.[!-?A-~]+")
 
 
 class Source(BaseModel):
@@ -68,7 +70,8 @@ class Config(BaseModel):
 
     @property
     def has_contact_email(self) -> bool:
-        return self.contact_email != PLACEHOLDER_EMAIL and bool(_EMAIL.match(self.contact_email))
+        email = self.contact_email
+        return email != PLACEHOLDER_EMAIL and bool(_EMAIL.fullmatch(email))
 
     @property
     def user_agent(self) -> str:
@@ -80,7 +83,8 @@ class Config(BaseModel):
 
 def load_config(path: Path = DEFAULT_SOURCES_PATH) -> Config:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if email := os.environ.get(CONTACT_EMAIL_ENV):
+    # Stripped: a secret pasted or piped in often ends with a newline.
+    if email := os.environ.get(CONTACT_EMAIL_ENV, "").strip():
         data["contact_email"] = email
     extractor = data.setdefault("extractor", {})
     if model := os.environ.get("SPIDERCRAWLER_MODEL"):
