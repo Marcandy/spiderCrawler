@@ -37,6 +37,27 @@ items), so intervals will be wide.
   Every scoring of the test split is counted and printed in the report.
 - A second person labels at least 10 test items; agreement is reported per field.
 
+## Building the labeled set
+
+Five steps. Only step 2 touches the network. A person types every label; no command writes,
+suggests, or pre-fills one.
+
+1. **Sample.** `spidercrawler eval-sample --seed 7` writes `eval/sample-plan.json`: criminal
+   proposals and adoptions, every Rule 490/790/791 item, negatives from other committees, and
+   the injection slots (3 dev, 5 test). It fetches nothing. Review the plan first.
+2. **Collect.** `spidercrawler eval-collect --plan eval/sample-plan.json --split dev`, then
+   `--split test`. Each call makes at most 30 polite requests; run it again until every item
+   is exported. Then `spidercrawler eval-inject --plan eval/sample-plan.json`.
+3. **Label.** `spidercrawler eval-label` shows the next unlabeled item's source text and the
+   guide's definition of each field, and asks for each value. It never shows model output.
+   `spidercrawler eval-status` shows what is left.
+4. **Freeze.** `spidercrawler eval-freeze` records a hash of every test item's text and
+   labels. After that a test item can be edited only with `eval-label --unfreeze --reason`,
+   which is logged in `eval/items/freeze-log.jsonl`, and `make eval-test` refuses to score
+   until `eval-freeze --refreeze`.
+5. **Second labeler.** `spidercrawler eval-label --second --split test` on at least 10 test
+   items, then `spidercrawler eval-agreement --docs docs/EVAL.md` fills in the table below.
+
 ## Reproducing
 
 ```sh
@@ -52,3 +73,12 @@ date, and the token cost of the cached responses.
 ## Results
 
 _Pending: labeled set and first scored run._
+
+### Label agreement
+
+Agreement between the maintainer's labels and a second labeler's, per field: count, percent,
+and Cohen's kappa for the fields with a fixed set of values. The test report repeats it.
+
+<!-- agreement:start -->
+_Pending: no item has second labels yet._
+<!-- agreement:end -->

@@ -8,6 +8,18 @@ model.
 Each item is a folder `eval/items/<split>/<id>/` with `input.txt` (the normalized source text
 the pipeline produces; do not edit it) and `gold.json` (you fill in `labels`).
 
+## Workflow
+
+1. `spidercrawler eval-sample --seed 7`, then review `eval/sample-plan.json`.
+2. `spidercrawler eval-collect --plan eval/sample-plan.json --split dev` (and `--split test`),
+   then `spidercrawler eval-inject --plan eval/sample-plan.json`.
+3. `spidercrawler eval-label` for each item. It shows the source text and the definitions
+   below, never a model's answer, and has no defaults: you type every value. `?` shows the
+   definition again and `!` the source text.
+4. `spidercrawler eval-freeze` once every test item is labeled.
+5. The second labeler runs `spidercrawler eval-label --second --split test`; then
+   `spidercrawler eval-agreement`.
+
 ## Fields
 
 ### `is_substantive`
