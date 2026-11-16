@@ -287,6 +287,25 @@ def summary(data_dir: DataOpt = Path("data")) -> None:
     typer.echo("\n".join(lines))
 
 
+@app.command("review-notice")
+def review_notice(
+    title: Annotated[
+        bool, typer.Option("--title", help="Print the issue title instead of the body.")
+    ] = False,
+    data_dir: DataOpt = Path("data"),
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+) -> None:
+    """Markdown for the "review needed" issue: titles, counts, and source links only.
+
+    Prints nothing when no item awaits review; the workflow then closes the issue.
+    """
+    from spidercrawler.notice import build_notice
+
+    notice = build_notice(RecordStore(data_dir), load_config(config_path).sources)
+    if notice is not None:
+        typer.echo(notice.title if title else notice.body, nl=title)
+
+
 @app.command()
 def cache(
     data_dir: DataOpt = Path("data"),
