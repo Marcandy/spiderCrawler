@@ -50,6 +50,47 @@ def _day(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%d")
 
 
+@dataclass(frozen=True)
+class ReviewQueue:
+    """Where each tracked item stands with the human gate."""
+
+    tracked: list[Item]
+    awaiting_extraction: list[Item] = field(default_factory=list)
+    awaiting_review: list[Item] = field(default_factory=list)
+    approved: int = 0
+    rejected: int = 0
+
+
+def review_queue(records: RecordStore, sources: list[Source]) -> ReviewQueue:
+    by_id = {s.id: s for s in sources}
+    # Items detected as new by a live run (not recorded as history by a seed run) that the
+    # pipeline would send for extraction: the criminal-rule items the digest is about.
+    tracked = [i for i in records.iter(Item) if needs_documents(i, by_id.get(i.source_id))]
+    newest: dict[str, Extraction] = {}
+    for ext in records.iter(Extraction):
+        if ext.item_id not in newest or ext.created_at > newest[ext.item_id].created_at:
+            newest[ext.item_id] = ext
+    reviews: dict[str, list[Review]] = {}
+    for review in records.iter(Review):
+        reviews.setdefault(review.extraction_id, []).append(review)
+
+    awaiting_extraction, awaiting_review = [], []
+    approved = rejected = 0
+    for item in tracked:
+        ext = newest.get(item.id)
+        if ext is None:
+            awaiting_extraction.append(item)
+            continue
+        decisions = reviews.get(ext.id, [])
+        if not decisions:
+            awaiting_review.append(item)
+        elif is_publishable(decisions):
+            approved += 1
+        else:
+            rejected += 1
+    return ReviewQueue(tracked, awaiting_extraction, awaiting_review, approved, rejected)
+
+
 def monitoring_status(
     records: RecordStore, sources: list[Source], now: datetime
 ) -> MonitoringStatus:
@@ -63,38 +104,17 @@ def monitoring_status(
     ok_runs = [r for r in runs if r.status == "ok"]
     last_ok = ok_runs[-1] if ok_runs else None
     run_started = {r.id: r.started_at for r in runs}
-    by_id = {s.id: s for s in sources}
 
-    # Items detected as new by a live run (not recorded as history by a seed run) that the
-    # pipeline would send for extraction: the criminal-rule items the digest is about.
-    tracked = [i for i in records.iter(Item) if needs_documents(i, by_id.get(i.source_id))]
+    queue = review_queue(records, sources)
+    tracked = queue.tracked
     recent = [
         i
         for i in tracked
         if (started := run_started.get(i.first_seen_run)) is not None and now - started <= RECENT
     ]
-
-    newest: dict[str, Extraction] = {}
-    for ext in records.iter(Extraction):
-        if ext.item_id not in newest or ext.created_at > newest[ext.item_id].created_at:
-            newest[ext.item_id] = ext
-    reviews: dict[str, list[Review]] = {}
-    for review in records.iter(Review):
-        reviews.setdefault(review.extraction_id, []).append(review)
-
-    awaiting_extraction = awaiting_review = approved = rejected = 0
-    for item in tracked:
-        ext = newest.get(item.id)
-        if ext is None:
-            awaiting_extraction += 1
-            continue
-        decisions = reviews.get(ext.id, [])
-        if not decisions:
-            awaiting_review += 1
-        elif is_publishable(decisions):
-            approved += 1
-        else:
-            rejected += 1
+    awaiting_extraction = len(queue.awaiting_extraction)
+    awaiting_review = len(queue.awaiting_review)
+    approved, rejected = queue.approved, queue.rejected
 
     stale = last_ok is None or now - last_ok.started_at > STALE_AFTER
     if last_ok is None:

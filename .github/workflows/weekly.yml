@@ -87,7 +87,7 @@ jobs:
             git commit -q -m "Weekly run $(date -u +%Y-%m-%d)"
             # Reviews may have been pushed meanwhile. Records are always new, distinct files,
             # so rebasing onto them cannot conflict; retry instead of losing this run.
-            for attempt in 1 2 3; do
+            for _ in 1 2 3; do
               git push origin data && exit 0
               git pull --rebase origin data
             done
@@ -100,3 +100,50 @@ jobs:
         run: |
           echo "spidercrawler run exited with ${{ steps.pipeline.outputs.exit_code }}"
           exit 1
+
+  # Tell the maintainer when an item awaits review: one open issue labeled `review-needed`,
+  # updated in place and closed when the queue is empty. Titles and source links only.
+  notify:
+    needs: run
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch the data branch
+        run: |
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth=1 origin data
+            git worktree add data-branch FETCH_HEAD
+          else
+            mkdir -p data-branch/data
+          fi
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: Open, update, or close the review issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          uv run spidercrawler review-notice --data-dir data-branch/data > notice.md
+          title=$(uv run spidercrawler review-notice --data-dir data-branch/data --title)
+          mapfile -t open < <(gh issue list --label review-needed --state open \
+            --json number --jq 'sort_by(.number) | .[].number')
+          if [ -s notice.md ]; then
+            if [ "${#open[@]}" -gt 0 ]; then
+              gh issue edit "${open[0]}" --title "$title" --body-file notice.md
+            else
+              gh label create review-needed --force --color D93F0B \
+                --description "A rule item awaits human review"
+              gh issue create --title "$title" --body-file notice.md --label review-needed
+            fi
+          else
+            for number in "${open[@]}"; do
+              gh issue close "$number" --comment "Nothing is awaiting review."
+            done
+          fi
