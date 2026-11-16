@@ -1,6 +1,7 @@
 """Command line interface: `spidercrawler run [--seed]`."""
 
 import os
+import pydoc
 from pathlib import Path
 from typing import Annotated
 
@@ -72,6 +73,9 @@ def run(
 
 
 EvalDirOpt = Annotated[Path, typer.Option("--eval-dir", help="Eval items root.")]
+PlanOpt = Annotated[
+    Path | None, typer.Option("--plan", help="Take the items from this eval-sample plan.")
+]
 
 
 @app.command("eval-list")
@@ -91,8 +95,11 @@ def eval_list(
 
 @app.command("eval-collect")
 def eval_collect(
-    item_ids: Annotated[list[str], typer.Argument(help="Item ids from eval-list.")],
+    item_ids: Annotated[
+        list[str] | None, typer.Argument(help="Item ids from eval-list (or use --plan).")
+    ] = None,
     split: Annotated[str, typer.Option(help="dev or test.")] = "dev",
+    plan: PlanOpt = None,
     config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
     data_dir: DataOpt = Path("data"),
     eval_dir: EvalDirOpt = Path("eval/items"),
@@ -100,10 +107,23 @@ def eval_collect(
     """Fetch the chosen items' PDFs (politely, within the request cap) and export them."""
     from spidercrawler.detector import load_known
     from spidercrawler.eval_data import export_item
+    from spidercrawler.eval_label import FreezeError, require_unfrozen
+    from spidercrawler.eval_sample import load_plan
     from spidercrawler.pipeline import fetch_documents
 
     if split not in ("dev", "test"):
         raise typer.BadParameter("split must be dev or test")
+    if bool(item_ids) == bool(plan):
+        typer.echo("error: give item ids or --plan, not both", err=True)
+        raise typer.Exit(2)
+    try:
+        require_unfrozen(eval_dir, split, "add items to it")
+    except FreezeError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    if plan:
+        item_ids = load_plan(plan).item_ids(split)  # type: ignore[arg-type]
+    assert item_ids
     config = load_config(config_path)
     records = RecordStore(data_dir)
     known = {k.item.id: k for k in load_known(records).values()}
@@ -143,28 +163,214 @@ def eval_collect(
 
 @app.command("eval-inject")
 def eval_inject(
-    item_id: Annotated[str, typer.Argument(help="An exported item to copy.")],
+    item_id: Annotated[
+        str | None, typer.Argument(help="An exported item to copy (or use --plan).")
+    ] = None,
     variant: Annotated[int, typer.Option(help="Which of the 8 synthetic injections.")] = 0,
     split: Annotated[str, typer.Option(help="dev or test.")] = "dev",
+    plan: PlanOpt = None,
     eval_dir: EvalDirOpt = Path("eval/items"),
 ) -> None:
-    """Make a synthetic injection item from an exported one (labeled synthetic)."""
-    from spidercrawler.eval_data import make_injection
+    """Make a synthetic injection item from an exported one (labeled synthetic).
 
-    matches = list(eval_dir.glob(f"*/{item_id}"))
-    if len(matches) != 1:
-        typer.echo(f"error: {item_id} not exported (found {len(matches)})", err=True)
+    With --plan, make every injection item the plan lists whose base item is exported.
+    """
+    from spidercrawler.eval_data import item_dir, make_injection
+    from spidercrawler.eval_label import FreezeError, require_unfrozen
+    from spidercrawler.eval_sample import load_plan
+
+    if bool(item_id) == bool(plan):
+        typer.echo("error: give an item id or --plan, not both", err=True)
         raise typer.Exit(2)
-    folder = make_injection(matches[0], eval_dir, split, variant)  # type: ignore[arg-type]
-    typer.echo(f"wrote {folder}")
+    if plan:
+        slots = [
+            (slot.base_item_id, slot.variant, name)
+            for name, sp in load_plan(plan).splits.items()
+            for slot in sp.injections
+        ]
+    else:
+        assert item_id
+        slots = [(item_id, variant, split)]
+    for base, number, target in slots:
+        matches = list(eval_dir.glob(f"*/{base}"))
+        if len(matches) != 1:
+            typer.echo(f"error: {base} not exported (found {len(matches)})", err=True)
+            raise typer.Exit(2)
+        if plan and (item_dir(eval_dir, target, f"{base}-inj{number}") / "gold.json").exists():
+            continue  # made by an earlier call
+        try:
+            require_unfrozen(eval_dir, target, "add items to it")
+        except FreezeError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        folder = make_injection(matches[0], eval_dir, target, number)  # type: ignore[arg-type]
+        typer.echo(f"wrote {folder}")
 
 
 @app.command("eval-status")
 def eval_status(eval_dir: EvalDirOpt = Path("eval/items")) -> None:
-    """Counts per split: total, labeled, synthetic, expungement yes."""
-    from spidercrawler.eval_data import dumps, status
+    """Counts per split: total, labeled, second-labeled, frozen, synthetic, expungement yes."""
+    from spidercrawler.eval_data import dumps
+    from spidercrawler.eval_label import freeze_state, labeling_status
 
-    typer.echo(dumps(status(eval_dir)))
+    typer.echo(dumps(labeling_status(eval_dir)))
+    state = freeze_state(eval_dir)
+    if state.manifest is None:
+        typer.echo("test split: not frozen")
+    else:
+        typer.echo(f"test split: frozen {state.manifest.frozen_at.date().isoformat()}")
+        for problem in state.problems():
+            typer.echo(f"  - {problem}", err=True)
+
+
+@app.command("eval-sample")
+def eval_sample(
+    seed: Annotated[int, typer.Option(help="Same seed and same known items: same plan.")],
+    out: Annotated[Path, typer.Option("--out", help="Where to write the plan.")] = Path(
+        "eval/sample-plan.json"
+    ),
+    force: Annotated[bool, typer.Option("--force", help="Replace a different plan.")] = False,
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+    data_dir: DataOpt = Path("data"),
+) -> None:
+    """Pick stratified eval candidates and write the plan for review. Fetches nothing."""
+    from spidercrawler.detector import load_known
+    from spidercrawler.eval_label import write_atomic
+    from spidercrawler.eval_sample import build_plan, describe, dumps
+
+    config = load_config(config_path)
+    known = list(load_known(RecordStore(data_dir)).values())
+    if not known:
+        typer.echo(f"error: no items in {data_dir}; seed or check out the data first", err=True)
+        raise typer.Exit(2)
+    plan = build_plan(known, {s.id: s for s in config.sources}, seed)
+    text = dumps(plan)
+    if out.exists() and out.read_text(encoding="utf-8") != text and not force:
+        typer.echo(f"error: {out} holds a different plan; --force replaces it", err=True)
+        raise typer.Exit(2)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write_atomic(out, text)
+    typer.echo(describe(plan))
+    typer.echo(f"wrote {out}. Nothing was fetched. Review it, then collect each split:")
+    typer.echo(f"  spidercrawler eval-collect --plan {out} --split dev")
+
+
+@app.command("eval-label")
+def eval_label(
+    item_id: Annotated[
+        str | None, typer.Argument(help="Item to label (default: the next unlabeled one).")
+    ] = None,
+    split: Annotated[str | None, typer.Option(help="With no item id: only this split.")] = None,
+    second: Annotated[
+        bool, typer.Option("--second", help="Label as the second labeler (gold.second.json).")
+    ] = False,
+    relabel: Annotated[bool, typer.Option("--relabel", help="Replace existing labels.")] = False,
+    unfreeze: Annotated[
+        bool, typer.Option("--unfreeze", help="Edit a frozen test item. Needs --reason; logged.")
+    ] = False,
+    reason: Annotated[str, typer.Option(help="Why the frozen item is edited. Logged.")] = "",
+    eval_dir: EvalDirOpt = Path("eval/items"),
+    guide_path: Annotated[Path, typer.Option("--guide")] = Path("eval/LABELING.md"),
+) -> None:
+    """Label one item at the terminal. Shows the source text and the guide, never a model's
+    output or a suggested value; every label is typed by a person."""
+    from spidercrawler import eval_label as tools
+
+    def fail(message: str) -> typer.Exit:
+        typer.echo(f"error: {message}", err=True)
+        return typer.Exit(2)
+
+    if split not in (None, "dev", "test"):
+        raise typer.BadParameter("split must be dev or test")
+    try:
+        guide = tools.guide_sections(guide_path.read_text(encoding="utf-8"))
+        item = (
+            tools.find_item(eval_dir, item_id)
+            if item_id
+            else tools.next_unlabeled(eval_dir, split, second)  # type: ignore[arg-type]
+        )
+    except (OSError, ValueError) as exc:
+        raise fail(str(exc)) from exc
+    if item is None:
+        typer.echo("nothing left to label")
+        return
+    existing = tools.second_gold(item) if second else item.gold
+    if existing is not None and existing.labels is not None and not relabel:
+        raise fail(f"{item.gold.id} is already labeled; --relabel replaces the labels")
+    # Second labels live in their own file and never change the frozen gold.json.
+    frozen = not second and item.gold.split == "test" and tools.freeze_state(eval_dir).frozen
+    if frozen and not (unfreeze and reason.strip()):
+        raise fail(
+            f"{item.gold.id} is in the frozen test split; "
+            "--unfreeze --reason '...' edits it and is logged"
+        )
+
+    result = tools.label_interactively(
+        item,
+        guide,
+        ask=lambda text: typer.prompt(text, default="", show_default=False),
+        say=typer.echo,
+        page=pydoc.pager,  # a pager at a terminal, plain output otherwise
+    )
+    if result is None:
+        typer.echo("not saved")
+        raise typer.Exit(1)
+    if frozen:  # logged before the write, so an edit can never go unrecorded
+        tools.log_event(eval_dir, "unfreeze-edit", f"{item.gold.id}: {reason.strip()}")
+    path = tools.save_labels(item, *result, second=second)
+    typer.echo(f"saved {path}")
+    if frozen:
+        typer.echo("the freeze no longer matches; run `spidercrawler eval-freeze --refreeze`")
+
+
+@app.command("eval-freeze")
+def eval_freeze(
+    refreeze: Annotated[
+        bool, typer.Option("--refreeze", help="Replace an existing freeze. Logged.")
+    ] = False,
+    check: Annotated[bool, typer.Option("--check", help="Only verify the freeze.")] = False,
+    eval_dir: EvalDirOpt = Path("eval/items"),
+) -> None:
+    """Freeze the labeled test split: a hash of every item's text and labels."""
+    from spidercrawler.eval_label import FreezeError, freeze, freeze_state
+
+    if check:
+        state = freeze_state(eval_dir)
+        if state.manifest is None:
+            typer.echo("test split: not frozen", err=True)
+            raise typer.Exit(1)
+        for problem in state.problems():
+            typer.echo(f"  - {problem}", err=True)
+        if not state.intact:
+            raise typer.Exit(1)
+        typer.echo(f"test split: {len(state.manifest.items)} items match the freeze")
+        return
+    try:
+        manifest = freeze(eval_dir, refreeze=refreeze)
+    except FreezeError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(f"froze {len(manifest.items)} test items")
+
+
+@app.command("eval-agreement")
+def eval_agreement(
+    split: Annotated[str, typer.Option(help="dev or test.")] = "test",
+    docs: Annotated[
+        Path | None, typer.Option("--docs", help="Also write the table into this file's block.")
+    ] = None,
+    eval_dir: EvalDirOpt = Path("eval/items"),
+) -> None:
+    """Per-field agreement between gold.json and a second labeler's gold.second.json."""
+    from spidercrawler.eval_label import agreement, render_agreement, update_docs
+
+    if split not in ("dev", "test"):
+        raise typer.BadParameter("split must be dev or test")
+    table = render_agreement(agreement(eval_dir, split))  # type: ignore[arg-type]
+    typer.echo(table)
+    if docs:
+        update_docs(docs, table)
+        typer.echo(f"updated {docs}")
 
 
 @app.command("eval")
@@ -180,6 +386,7 @@ def eval_cmd(
 ) -> None:
     """Score the extractor on a split. Offline from the response cache unless --live."""
     from spidercrawler.eval_data import INJECTIONS, REGEX_VISIBLE_INJECTIONS, load_items
+    from spidercrawler.eval_label import agreement, freeze_state, read_log, render_agreement
     from spidercrawler.evaluate import (
         MissingCacheError,
         compute_metrics,
@@ -193,6 +400,20 @@ def eval_cmd(
     if split not in ("dev", "test"):
         raise typer.BadParameter("split must be dev or test")
     config = load_config(config_path)
+    freeze_note = None
+    if split == "test":
+        # Reported numbers come from a frozen split only (PLAN.md section 8).
+        state = freeze_state(eval_dir)
+        if not state.intact:
+            why = "; ".join(state.problems()) or "it is not frozen"
+            typer.echo(f"error: test split: {why}. Run `spidercrawler eval-freeze`.", err=True)
+            raise typer.Exit(2)
+        assert state.manifest
+        edits = sum(e["action"] != "freeze" for e in read_log(eval_dir))
+        freeze_note = (
+            f"Test split frozen {state.manifest.frozen_at.date().isoformat()}; "
+            f"unfreeze edits and refreezes on record: {edits}"
+        )
     client = None
     if live:
         if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -216,8 +437,17 @@ def eval_cmd(
         typer.echo(f"error: no cached response for: {exc}. Run `make eval-live` first.", err=True)
         raise typer.Exit(2) from exc
     test_runs = record_test_run(reports_dir) if split == "test" and results else 0
+    pairs = agreement(eval_dir, split)  # type: ignore[arg-type]
     report = render_report(
-        split, results, compute_metrics(results), skipped, model, effort, test_runs
+        split,
+        results,
+        compute_metrics(results),
+        skipped,
+        model,
+        effort,
+        test_runs,
+        freeze_note=freeze_note,
+        agreement=render_agreement(pairs) if pairs[0].n else None,
     )
     reports_dir.mkdir(parents=True, exist_ok=True)
     (reports_dir / f"{split}.md").write_text(report, encoding="utf-8")
