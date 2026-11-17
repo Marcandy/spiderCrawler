@@ -22,6 +22,14 @@ hand-labeled set of historical items from the Pennsylvania Supreme Court rules c
 | Injection: flag rate | Did `suspicious_input` fire? Reported separately for the 5 phrasings the flag regex knows and the 3 paraphrased ones it is not designed to see. |
 | Keyword baseline | Does a regex (expungement words; changed text plus a rule number) do as well on relevance and substantive? If it does, this page will say so. |
 
+With `--repair N` the report adds, for the repair loop ([AGENTIC.md](AGENTIC.md) section 1):
+
+| Metric | Question it answers |
+|---|---|
+| Block rate, before and after | How many items the verifier blocks on the first attempt, and after up to N repair calls. |
+| Supported-but-wrong, before and after | **The test that matters.** If repair lowers the block rate by raising this rate, it turned visible failures into invisible ones. |
+| Attempts and tokens per item | What the loop costs. |
+
 Every number is reported as a count with a 95% Wilson interval. The set is small (about 50
 items), so intervals will be wide.
 
@@ -64,9 +72,11 @@ suggests, or pre-fills one.
 make eval        # dev split, offline from eval/cache (fails if a response is missing)
 make eval-live   # dev split, calls the API for missing responses (costs money)
 make eval-test   # the frozen test split
+uv run spidercrawler eval --split dev --repair 1   # with the repair loop (dev only)
 ```
 
-Responses are cached by prompt version, model, effort, schema version, and input, so the
+Responses are cached by prompt version, model, effort, schema version, and input (a repair
+attempt also by its number and a hash of the conversation it answered), so the
 report can be regenerated offline. Each report records model id, effort, prompt version,
 date, and the token cost of the cached responses.
 

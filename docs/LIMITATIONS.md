@@ -28,6 +28,14 @@ Read this before relying on anything this tool produces.
   the eval measures how often.
 - Quote matching ignores letter case and hyphens inside words, so "Court" and "court" match.
 
+## The repair loop
+
+- Off by default. When on, the model is shown the verifier's reasons and asked to correct its
+  output. An output repaired this way has been fitted to the checker: its quotes exist, which
+  says nothing new about whether its claims are right. Such items are flagged `repaired:N`
+  and always go to `needs_attention`.
+- Its effect on the supported-but-wrong rate has not been measured (no labeled items yet).
+
 ## Data and parsing
 
 - PDF text extraction can miss underlined additions in some documents. Those documents are

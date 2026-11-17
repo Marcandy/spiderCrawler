@@ -171,6 +171,11 @@ data/
   reviews/<review_id>.json      extraction_id, reviewer, decision,
                                 edited_output, edited_verifier_status,
                                 edited_verifier_notes, note, decided_at
+  attempts/<attempt_id>.json    extraction_id, number, messages_hash, fed_back, output,
+                                verifier_status, verifier_reasons, tokens, latency_ms,
+                                stop_reason (one per model call; added 2026-11-16)
+  traces/<run_id>.jsonl         one line per step: ids, duration, outcome, token counts.
+                                Never document text (added 2026-11-16)
   runs/<run_id>.json            started_at, finished_at, sources_checked,
                                 items_found, extractions_made, blocked,
                                 errors, tokens_used, rows_seen, status
