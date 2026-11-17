@@ -95,6 +95,12 @@ In production the weekly workflow commits records to the `data` branch; review w
 `make data-checkout`, `make review DATA_DIR=data-branch/data`, `make data-push`, `make publish`.
 Source access decisions are recorded in [docs/SOURCES.md](docs/SOURCES.md).
 
+## Agentic parts
+
+A bounded repair loop, lexical retrieval, a read-only MCP server (`spidercrawler mcp`), and
+a review assistant are described, with what each does not prove, in
+[docs/AGENTIC.md](docs/AGENTIC.md). None of them can approve or publish anything.
+
 ## Before
 
 This is a rebuild of a 2023 Node/Express Amazon scraper prototype, preserved at tag
