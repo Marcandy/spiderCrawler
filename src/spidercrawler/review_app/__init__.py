@@ -17,6 +17,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from spidercrawler.config import Config
 from spidercrawler.detector import load_known
 from spidercrawler.records import Attempt, Document, Extraction, Item, RecordStore, Review
+from spidercrawler.retrieval import open_index, related_items
 from spidercrawler.router import DecisionRefusedError, decide, is_publishable
 from spidercrawler.verifier import RowContext
 
@@ -80,6 +81,12 @@ def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer
         html = _templates.get_template("detail.html").render(
             ext=ext,
             attempts=attempts,
+            links=related_items(
+                item,
+                open_index(records, config.sources),
+                {i.id: i for i in records.iter(Item)},
+                config.sources,
+            ),
             item=item,
             row=row,
             docs=docs,

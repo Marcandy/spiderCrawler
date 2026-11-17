@@ -16,39 +16,59 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 
 from spidercrawler.canonical import canonicalize
+from spidercrawler.corpus import Chunk
 from spidercrawler.normalize import content_hash
 from spidercrawler.records import Extraction, utcnow
 from spidercrawler.router import route
 from spidercrawler.schema import SCHEMA_VERSION, ChangeSummary
 from spidercrawler.verifier import RowContext, verify
 
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "extract_v1.md"
+PROMPTS = Path(__file__).resolve().parents[2] / "prompts"
+PROMPT_VERSIONS = ("v1", "v2")  # v2 adds <related_context>; v1 is never edited
+PROMPT_PATH = PROMPTS / "extract_v1.md"
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_EFFORT = "medium"
 OPEN_TAG, CLOSE_TAG = "<source_document>", "</source_document>"
 # Any spelling of our delimiter tags inside data: case, spaces, or the listing tag.
-_TAG_LOOKALIKE = re.compile(r"<\s*/?\s*(source_document|committee_listing)\s*>", re.IGNORECASE)
+_TAG_LOOKALIKE = re.compile(
+    r"<\s*/?\s*(source_document|committee_listing|related_context)\s*>", re.IGNORECASE
+)
 
 
 def _neutralize(text: str) -> str:
     return _TAG_LOOKALIKE.sub(lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"), text)
 
 
-def load_prompt(path: Path = PROMPT_PATH) -> tuple[str, str]:
-    """Returns (system prompt, version). The version changes whenever the file changes."""
+def load_prompt(path: Path | str = PROMPT_PATH) -> tuple[str, str]:
+    """Returns (system prompt, version). The version changes whenever the file changes.
+
+    Accepts a path or a short name ("v1", "v2").
+    """
+    if path in PROMPT_VERSIONS:
+        path = PROMPTS / f"extract_{path}.md"
+    path = Path(path)
     text = path.read_text(encoding="utf-8")
     return text, f"{path.stem}:{hashlib.sha256(text.encode()).hexdigest()[:8]}"
 
 
-def build_user_message(source_text: str, row: RowContext | None) -> str:
+def related_block(chunks: list[Chunk]) -> str:
+    """Retrieved chunks as one text. Empty when there is nothing to add."""
+    return "\n\n---\n\n".join(c.text for c in chunks)
+
+
+def build_user_message(source_text: str, row: RowContext | None, related: str = "") -> str:
     """Everything from the website goes inside delimiters, including the page listing.
 
-    Data cannot close a delimiter early: any look-alike tag in it is neutralized.
+    Data cannot close a delimiter early: any look-alike tag in it is neutralized. `related`
+    (prompt v2 only) is retrieved text from other source documents: a second channel for
+    injected text, so it gets the same treatment and its own delimiter.
     """
     parts = []
     if row is not None:
         listing = f"table: {row.table}\ntitle: {row.title}\ndate column: {row.date_literal}"
         parts.append(f"<committee_listing>\n{_neutralize(listing)}\n</committee_listing>")
+    if related:
+        parts.append(f"<related_context>\n{_neutralize(related)}\n</related_context>")
     parts.append(f"{OPEN_TAG}\n{_neutralize(source_text)}\n{CLOSE_TAG}")
     return "\n\n".join(parts)
 

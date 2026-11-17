@@ -8,6 +8,7 @@ Only labeled items are scored. Counts are reported with 95% Wilson intervals.
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -118,6 +119,12 @@ def _score(ext: Extraction, labels, input_text: str) -> tuple[dict[str, bool], d
     return correct, answer, len(quotes), sum(for_matching(q) not in source for q in quotes)
 
 
+def model_input_hash(input_text: str, related: str = "") -> str:
+    """Cache key part for what the model read. Related context changes as the corpus grows,
+    so it is part of the key; without it the key is what it always was."""
+    return content_hash(f"{input_text}\x1f{related}" if related else input_text)
+
+
 def evaluate_item(
     item: EvalItem,
     cache: ResponseCache,
@@ -127,12 +134,14 @@ def evaluate_item(
     max_tokens: int,
     regex_visible: set[str],
     max_repairs: int = 0,
+    prompt: str = "v1",
+    related: str = "",
 ) -> ItemResult:
     gold, labels = item.gold, item.gold.labels
     assert labels is not None
-    system, prompt_version = load_prompt()
+    system, prompt_version = load_prompt(prompt)
     row = RowContext(gold.row.table, gold.row.title, gold.row.date_literal, gold.rule_prefix)
-    input_hash = content_hash(item.input_text)
+    input_hash = model_input_hash(item.input_text, related)
 
     def call(messages: list[dict], number: int, digest: str):
         key = ResponseCache.key(prompt_version, model, effort, input_hash, number, digest)
@@ -151,7 +160,7 @@ def evaluate_item(
         return verdict.status, verdict.reasons
 
     attempts = run_attempts(
-        call, check, build_user_message(item.input_text, row), max_repairs=max_repairs
+        call, check, build_user_message(item.input_text, row, related), max_repairs=max_repairs
     )
 
     def build(result, flags: list[str]) -> Extraction:
@@ -295,22 +304,39 @@ def run_eval(
     max_tokens: int,
     regex_visible: set[str],
     max_repairs: int = 0,
+    prompt: str = "v1",
+    related_for: Callable[[EvalItem], str] = lambda item: "",
 ) -> tuple[list[ItemResult], list[str]]:
     """Returns (results, ids skipped because unlabeled). Raises MissingCacheError offline."""
     labeled = [i for i in items if i.gold.labels is not None]
     skipped = [i.gold.id for i in items if i.gold.labels is None]
     if client is None:
-        _, version = load_prompt()
+        _, version = load_prompt(prompt)
         missing = [
             i.gold.id
             for i in labeled
-            if cache.get(ResponseCache.key(version, model, effort, content_hash(i.input_text)))
+            if cache.get(
+                ResponseCache.key(
+                    version, model, effort, model_input_hash(i.input_text, related_for(i))
+                )
+            )
             is None
         ]
         if missing:
             raise MissingCacheError(", ".join(missing))
     results = [
-        evaluate_item(i, cache, client, model, effort, max_tokens, regex_visible, max_repairs)
+        evaluate_item(
+            i,
+            cache,
+            client,
+            model,
+            effort,
+            max_tokens,
+            regex_visible,
+            max_repairs,
+            prompt,
+            related_for(i),
+        )
         for i in labeled
     ]
     return results, skipped
@@ -327,8 +353,9 @@ def render_report(
     freeze_note: str | None = None,
     agreement: str | None = None,
     max_repairs: int = 0,
+    prompt: str = "v1",
 ) -> str:
-    _, version = load_prompt()
+    _, version = load_prompt(prompt)
     tokens_in = sum(r.input_tokens for r in results)
     tokens_out = sum(r.output_tokens for r in results)
     price_in, price_out = PRICES.get(model, (0.0, 0.0))
@@ -343,8 +370,10 @@ def render_report(
         f"- Tokens behind these responses: {tokens_in} in / {tokens_out} out "
         f"(about ${cost:.2f} at list price when they were generated; re-runs from cache are free)",
     ]
-    if max_repairs and results:
+    if results:
         per_item = (tokens_in + tokens_out) / len(results)
+        lines.append(f"- Tokens per item: {per_item:.0f}")
+    if max_repairs and results:
         lines.append(
             f"- Repair loop: up to {max_repairs} repair call(s) per item; "
             f"{sum(r.attempts for r in results) / len(results):.2f} attempts and "

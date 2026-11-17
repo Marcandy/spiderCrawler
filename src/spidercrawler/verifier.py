@@ -37,6 +37,11 @@ _DELETION = re.compile(r"\[[^\[\]]*\]")
 STAGE_FOR_TABLE = {"approved": "adopted", "proposed": "proposed", "prior_proposed": "proposed"}
 
 
+def is_suspicious(text: str) -> bool:
+    """Rule 7's pattern, for text that reaches the model beside the source (related context)."""
+    return bool(_SUSPICIOUS.search(text))
+
+
 @dataclass(frozen=True)
 class RowContext:
     """What the committee page itself says about the item (rule 8 cross-check)."""

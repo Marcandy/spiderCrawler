@@ -21,6 +21,7 @@ from spidercrawler.extractor import (
     build_user_message,
     call_conversation,
     load_prompt,
+    related_block,
 )
 from spidercrawler.fetcher import Fetcher, FetchError, RequestCapError
 from spidercrawler.index_parser import parse_committee_page
@@ -41,9 +42,10 @@ from spidercrawler.repair import (
     repair_flags,
     run_attempts,
 )
+from spidercrawler.retrieval import open_index, related_context
 from spidercrawler.schema import SCHEMA_VERSION, ChangeSummary
 from spidercrawler.trace import Trace
-from spidercrawler.verifier import RowContext, verify
+from spidercrawler.verifier import RowContext, is_suspicious, verify
 
 # Context committees' items are only worth reading if they touch criminal rules.
 _CRIMINAL_REF = re.compile(r"Crim\.?\s*P|Criminal", re.IGNORECASE)
@@ -251,9 +253,11 @@ def _extract(
     Returns (extractions made, blocked, tokens used). Stops when the budget is hit.
     """
     sources = {s.id: s for s in config.sources}
-    system, prompt_version = load_prompt()
+    system, prompt_version = load_prompt(config.extractor.prompt)
     model, effort = config.extractor.model, config.extractor.effort
     budget = Budget.from_limits(config.limits)
+    # Prompt v2 only: an index of source documents and titles, never of model outputs.
+    index = open_index(records, config.sources) if config.extractor.prompt == "v2" else None
     docs_by_item: dict[str, dict[str, Document]] = {}
     for doc in records.iter(Document):
         docs_by_item.setdefault(doc.item_id, {})[doc.url] = doc
@@ -279,11 +283,17 @@ def _extract(
         )
         if records.exists(Extraction, ext_id):
             continue
+        related = ""
+        if index is not None:
+            chunks = related_context(item, index, config.sources, config.extractor.related_chunks)
+            related = related_block(chunks)
+            if is_suspicious(related):  # retrieved text is a second injection channel
+                doc_flags.append("suspicious_related_context")
         ids = {"item_id": item.id, "extraction_id": ext_id}
         attempts = []
         if "no_text" in doc_flags:
             result = CallResult(None, "no_text: document has no text layer", 0, 0)
-        elif not budget.try_start(source_text):
+        elif not budget.try_start(source_text + related):
             errors.append(f"extraction stopped: {budget.stopped_reason}; rest wait for next run")
             break
         else:
@@ -302,7 +312,7 @@ def _extract(
                 attempts = run_attempts(
                     call,
                     check,
-                    build_user_message(source_text, row),
+                    build_user_message(source_text, row, related),
                     max_repairs=config.repair.max_repairs,
                     budget=budget,
                     trace=trace,

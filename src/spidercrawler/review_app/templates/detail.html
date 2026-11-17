@@ -34,6 +34,10 @@
 {% for r in reviews %}<li>{{ r.decided_at }}: {{ r.decision }} by {{ r.reviewer }}{% if r.note %}: {{ r.note }}{% endif %}</li>{% endfor %}
 </ul><p>Publishable: <strong>{{ "yes" if publishable else "no" }}</strong></p>{% endif %}
 
+{% if links %}<h2>Related items already recorded</h2>
+<p>Matched by rule number or by words in the title, not by meaning. The reason is shown; check it.</p>
+<ul>{% for l in links %}<li>{{ l.title }} <code>{{ l.item_id }}</code>: {{ l.reason }}</li>{% endfor %}</ul>{% endif %}
+
 <h2>Source text the model saw</h2>
 <pre>{% for d in docs %}{{ d.text }}
 
