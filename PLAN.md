@@ -23,7 +23,10 @@ Expungement is one output field (`expungement_relevance`), not the headline. The
 ### Non-goals (MVP)
 
 - No legal advice. The tool says what changed and where. It never says who is eligible for anything.
-- No other jurisdictions, no user accounts, no email alerts, no RAG, no multi-agent setup.
+- No other jurisdictions, no user accounts, no email alerts, no multi-agent setup.
+- Revised 2026-11-16 (section 11c): the MVP also said "no RAG" and had no agent. The project
+  now has lexical retrieval over its own records and one advisory, read-only, tool-using
+  review assistant. The extraction call still has no tools. See `docs/AGENTIC.md`.
 - No auto-publishing. Ever.
 
 ---
@@ -484,6 +487,19 @@ Each finding was checked against the first draft. Rows marked *revised* were cha
 | 16 | `pypdf` drops underline, so additions look like unchanged text. | Medium | `pdfplumber` char-level underline detection; `markup_lost` flag when it fails. |
 | 17 | Only about 5 expungement items exist on the source. | Medium | Pitch changed to criminal procedure rules; expungement is a field. |
 | 18 | If the site moves its PDFs, every item gets a new key and floods the queue; append-only history keeps the duplicates forever. A half-loaded page passes the zero-rows check. | Medium | Volume guards in `parse_health` (decided 2026-11-01): stop and record nothing, accept with `run --seed`. |
+
+### 11c. Third review (2026-11-16): the non-goals revisited
+
+The MVP non-goals said "no RAG, no multi-agent setup". This review found that the project
+showed guardrails around one call and nothing else. Details in `docs/AGENTIC.md`.
+
+| # | Attack on the plan | Severity | Resolution |
+|---|---|---|---|
+| 1 | A verifier failure goes straight to a person, though the reasons are precise and machine-readable. | Medium | A bounded repair loop (at most 2 attempts) feeds rules 1–6 back. Rule 8 is never fed back, and a repaired pass routes to `needs_attention`. |
+| 2 | The model sees only the item's own PDFs; an adoption cannot be read next to its proposal. | Medium | Lexical retrieval (SQLite FTS5) over stored source documents. Reverses "no RAG". Model outputs are never retrieved. Off by default until dev numbers support it. |
+| 3 | A run records totals only; a bad output cannot be debugged afterwards. | Medium | One `attempts/` record per model call and one `traces/` file per run, with no document text. |
+| 4 | "Supported but wrong" is left to a reviewer reading raw JSON. | High | One tool-using review assistant: read-only tools, no network, advisory output, can escalate but never unblock or approve. Still one agent, so "no multi-agent setup" stands. |
+| 5 | Adding tools undoes the "no tools" injection defense. | High | The extraction call keeps no tools. Only the assistant holds tools, they are read-only, and its output never reaches a public surface. |
 
 **Remaining risks accepted:**
 - Single LLM vendor.
