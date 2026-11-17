@@ -623,6 +623,18 @@ def eval_retrieval(
 
 
 @app.command()
+def mcp(
+    data_dir: DataOpt = Path("data"),
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+) -> None:
+    """Serve the read-only tools over MCP on stdio (docs/MCP.md). Nothing it serves can
+    approve, edit, fetch, or call a model."""
+    from spidercrawler.mcp_server import build_server
+
+    build_server(RecordStore(data_dir), load_config(config_path)).run("stdio")
+
+
+@app.command()
 def review(
     port: Annotated[int, typer.Option(help="Local port.")] = 8000,
     reviewer: Annotated[str, typer.Option(help="Name recorded on decisions.")] = "maintainer",
