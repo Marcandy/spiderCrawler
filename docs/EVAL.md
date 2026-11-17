@@ -30,6 +30,20 @@ With `--repair N` the report adds, for the repair loop ([AGENTIC.md](AGENTIC.md)
 | Supported-but-wrong, before and after | **The test that matters.** If repair lowers the block rate by raising this rate, it turned visible failures into invisible ones. |
 | Attempts and tokens per item | What the loop costs. |
 
+`spidercrawler eval --prompt v2` scores the prompt that adds retrieved context, on dev only,
+and writes `eval/reports/dev-v2.md` beside the v1 report so the two can be compared: field
+accuracy, supported-but-wrong, and tokens per item. The test split scores only the configured
+pipeline; `--prompt` and `--repair` variants are refused there.
+
+### Retrieval eval
+
+Does `related_items` find an adoption's proposal? The owner labels links with
+`spidercrawler eval-link` (it shows the adopted item and no candidate; `eval-link --list`
+prints proposals in id order, not ranked). `spidercrawler eval-retrieval -k 5` then reports
+recall@k and MRR with counts. Looking proposals up with `spidercrawler search` while
+labeling would bias the labels toward what the retriever already finds; use the list.
+**Status: pending, no link is labeled.**
+
 Every number is reported as a count with a 95% Wilson interval. The set is small (about 50
 items), so intervals will be wide.
 
