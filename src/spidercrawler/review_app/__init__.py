@@ -16,9 +16,17 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from spidercrawler.config import Config
 from spidercrawler.detector import load_known
-from spidercrawler.records import Attempt, Document, Extraction, Item, RecordStore, Review
+from spidercrawler.records import (
+    Attempt,
+    Brief,
+    Document,
+    Extraction,
+    Item,
+    RecordStore,
+    Review,
+)
 from spidercrawler.retrieval import open_index, related_items
-from spidercrawler.router import DecisionRefusedError, decide, is_publishable
+from spidercrawler.router import DecisionRefusedError, decide, effective_status, is_publishable
 from spidercrawler.verifier import RowContext
 
 QUEUE_ORDER = ("blocked", "needs_attention", "ready_for_review")
@@ -78,8 +86,14 @@ def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer
             (a for a in records.iter(Attempt) if a.extraction_id == ext.id),
             key=lambda a: a.number,
         )
+        briefs = sorted(
+            (b for b in records.iter(Brief) if b.extraction_id == ext.id),
+            key=lambda b: b.created_at,
+        )
         html = _templates.get_template("detail.html").render(
             ext=ext,
+            status=effective_status(ext, briefs),
+            brief=briefs[-1] if briefs else None,
             attempts=attempts,
             links=related_items(
                 item,
@@ -103,19 +117,19 @@ def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer
     @app.get("/", response_class=HTMLResponse)
     def queue() -> str:
         items = {i.id: i for i in records.iter(Item)}
+        briefs = list(records.iter(Brief))
         rows = []
         for ext in latest_extractions().values():
             reviews = reviews_for(ext.id)
             rows.append(
                 {
                     "ext": ext,
+                    "status": effective_status(ext, briefs),
                     "item": items.get(ext.item_id),
                     "decision": reviews[-1].decision if reviews else None,
                 }
             )
-        rows.sort(
-            key=lambda r: (r["decision"] is not None, QUEUE_ORDER.index(r["ext"].queue_status))
-        )
+        rows.sort(key=lambda r: (r["decision"] is not None, QUEUE_ORDER.index(r["status"])))
         return _templates.get_template("queue.html").render(rows=rows)
 
     @app.get("/extraction/{extraction_id}", response_class=HTMLResponse)

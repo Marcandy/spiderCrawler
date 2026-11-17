@@ -7,7 +7,7 @@
 <tr><th>Status</th><th>Item</th><th>Verifier</th><th>Flags</th><th>Decision</th></tr>
 {% for r in rows %}
 <tr>
-  <td><span class="status {{ r.ext.queue_status }}">{{ r.ext.queue_status }}</span></td>
+  <td><span class="status {{ r.status }}">{{ r.status }}</span>{% if r.status != r.ext.queue_status %} (raised by AI second opinion){% endif %}</td>
   <td><a href="/extraction/{{ r.ext.id }}">{{ r.item.title if r.item else r.ext.item_id }}</a></td>
   <td>{{ r.ext.verifier_status }}</td>
   <td>{{ r.ext.flags | length }}</td>
