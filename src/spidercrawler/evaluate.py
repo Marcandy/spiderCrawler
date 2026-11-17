@@ -8,21 +8,26 @@ Only labeled items are scored. Counts are reported with 95% Wilson intervals.
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from spidercrawler.canonical import canonicalize
 from spidercrawler.eval_data import EvalItem
 from spidercrawler.extractor import (
     LLMClient,
     ResponseCache,
     build_extraction,
     build_user_message,
-    call_model,
+    call_conversation,
     load_prompt,
 )
 from spidercrawler.normalize import content_hash, for_matching
-from spidercrawler.verifier import RowContext
+from spidercrawler.records import Extraction
+from spidercrawler.repair import combined_result, repair_flags, run_attempts
+from spidercrawler.schema import ChangeSummary
+from spidercrawler.verifier import RowContext, verify
 
 # Claude Sonnet 5.5 list prices, USD per million tokens (input, output). Report only.
 PRICES = {"claude-sonnet-5-5": (2.0, 10.0)}
@@ -54,8 +59,14 @@ class ItemResult:
     baseline_substantive: bool
     gold_relevance: str
     gold_substantive: bool
-    input_tokens: int
+    input_tokens: int  # summed over every attempt
     output_tokens: int
+    attempts: int = 1
+    # The first attempt on its own, i.e. what the pipeline produces with repair off.
+    first_queue_status: str = ""
+    first_all_correct: bool = False
+    first_unsupported_claims: int = 0
+    first_answered: bool = False
 
     @property
     def all_correct(self) -> bool:
@@ -83,39 +94,8 @@ def keyword_baseline(text: str) -> tuple[str, bool]:
     return relevance, substantive
 
 
-def evaluate_item(
-    item: EvalItem,
-    cache: ResponseCache,
-    client: LLMClient | None,
-    model: str,
-    effort: str,
-    max_tokens: int,
-    regex_visible: set[str],
-) -> ItemResult:
-    gold, labels = item.gold, item.gold.labels
-    assert labels is not None
-    system, prompt_version = load_prompt()
-    row = RowContext(gold.row.table, gold.row.title, gold.row.date_literal, gold.rule_prefix)
-    key = ResponseCache.key(prompt_version, model, effort, content_hash(item.input_text))
-    result = cache.get(key)
-    if result is None:
-        if client is None:
-            raise MissingCacheError(gold.id)
-        result = call_model(
-            client, system, build_user_message(item.input_text, row), model, effort, max_tokens
-        )
-        cache.put(key, result)
-    ext = build_extraction(
-        gold.id,
-        item.input_text,
-        result,
-        model=model,
-        effort=effort,
-        prompt_version=prompt_version,
-        row=row,
-        rule_prefix=gold.rule_prefix,
-        document_flags=[],
-    )
+def _score(ext: Extraction, labels, input_text: str) -> tuple[dict[str, bool], dict, int, int]:
+    """(per-field correctness, scored answer, claims, unsupported claims) for one output."""
     out, canon = ext.output or {}, ext.canonical or {}
     correct = {
         "rule_ids": ext.output is not None
@@ -127,9 +107,6 @@ def evaluate_item(
         "expungement_relevance": out.get("expungement_relevance") == labels.expungement_relevance,
         "is_substantive": out.get("is_substantive") == labels.is_substantive,
     }
-    source = for_matching(item.input_text)
-    quotes = [c["evidence_quote"] for c in out.get("claims", [])]
-    base_rel, base_sub = keyword_baseline(item.input_text)
     answer = {
         "rule_ids": sorted(canon.get("rule_ids", [])),
         "effective_date": canon.get("effective_date"),
@@ -137,6 +114,74 @@ def evaluate_item(
         "expungement_relevance": out.get("expungement_relevance"),
         "is_substantive": out.get("is_substantive"),
     }
+    source = for_matching(input_text)
+    quotes = [c["evidence_quote"] for c in out.get("claims", [])]
+    return correct, answer, len(quotes), sum(for_matching(q) not in source for q in quotes)
+
+
+def model_input_hash(input_text: str, related: str = "") -> str:
+    """Cache key part for what the model read. Related context changes as the corpus grows,
+    so it is part of the key; without it the key is what it always was."""
+    return content_hash(f"{input_text}\x1f{related}" if related else input_text)
+
+
+def evaluate_item(
+    item: EvalItem,
+    cache: ResponseCache,
+    client: LLMClient | None,
+    model: str,
+    effort: str,
+    max_tokens: int,
+    regex_visible: set[str],
+    max_repairs: int = 0,
+    prompt: str = "v1",
+    related: str = "",
+) -> ItemResult:
+    gold, labels = item.gold, item.gold.labels
+    assert labels is not None
+    system, prompt_version = load_prompt(prompt)
+    row = RowContext(gold.row.table, gold.row.title, gold.row.date_literal, gold.rule_prefix)
+    input_hash = model_input_hash(item.input_text, related)
+
+    def call(messages: list[dict], number: int, digest: str):
+        key = ResponseCache.key(prompt_version, model, effort, input_hash, number, digest)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached, None
+        if client is None:
+            raise MissingCacheError(f"{gold.id} (attempt {number})")
+        result, reply = call_conversation(client, system, messages, model, effort, max_tokens)
+        cache.put(key, result)
+        return result, reply
+
+    def check(output: dict) -> tuple[str, list[str]]:
+        summary = ChangeSummary.model_validate(output)
+        verdict = verify(summary, canonicalize(summary, gold.rule_prefix), item.input_text, row)
+        return verdict.status, verdict.reasons
+
+    attempts = run_attempts(
+        call, check, build_user_message(item.input_text, row, related), max_repairs=max_repairs
+    )
+
+    def build(result, flags: list[str]) -> Extraction:
+        return build_extraction(
+            gold.id,
+            item.input_text,
+            result,
+            model=model,
+            effort=effort,
+            prompt_version=prompt_version,
+            row=row,
+            rule_prefix=gold.rule_prefix,
+            document_flags=flags,
+        )
+
+    result = combined_result(attempts)
+    ext = build(result, repair_flags(attempts))
+    first = build(attempts[0].result, [])
+    correct, answer, claims, unsupported = _score(ext, labels, item.input_text)
+    first_correct, _, _, first_unsupported = _score(first, labels, item.input_text)
+    base_rel, base_sub = keyword_baseline(item.input_text)
     return ItemResult(
         id=gold.id,
         original_id=gold.id.rsplit("-inj", 1)[0] if gold.synthetic else None,
@@ -145,11 +190,11 @@ def evaluate_item(
         regex_visible_injection=gold.injection in regex_visible,
         hard=labels.hard,
         correct=correct,
-        claims=len(quotes),
-        unsupported_claims=sum(for_matching(q) not in source for q in quotes),
+        claims=claims,
+        unsupported_claims=unsupported,
         verifier_status=ext.verifier_status,
         queue_status=ext.queue_status,
-        relevance=out.get("expungement_relevance"),
+        relevance=(ext.output or {}).get("expungement_relevance"),
         flags=ext.flags,
         baseline_relevance=base_rel,
         baseline_substantive=base_sub,
@@ -157,6 +202,11 @@ def evaluate_item(
         gold_substantive=labels.is_substantive,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
+        attempts=len(attempts),
+        first_queue_status=first.queue_status,
+        first_all_correct=all(first_correct.values()),
+        first_unsupported_claims=first_unsupported,
+        first_answered=first.output is not None,
     )
 
 
@@ -219,6 +269,23 @@ def compute_metrics(results: list[ItemResult]) -> dict[str, Metric]:
         sum("suspicious_input" in r.flags for r in synth if not r.regex_visible_injection),
         sum(not r.regex_visible_injection for r in synth),
     )
+    if any(r.attempts > 1 for r in real):
+        # Before = the first attempt alone. A loop that only moves items from "blocked" to
+        # "supported but wrong" is a regression, so both rates are shown side by side.
+        first_answered = [r for r in real if r.first_answered]
+        m["repair.block_rate.before"] = Metric(
+            sum(r.first_queue_status == "blocked" for r in real), len(real)
+        )
+        m["repair.block_rate.after"] = Metric(
+            sum(r.queue_status == "blocked" for r in real), len(real)
+        )
+        m["repair.supported_but_wrong.before"] = Metric(
+            sum(
+                r.first_unsupported_claims == 0 and not r.first_all_correct for r in first_answered
+            ),
+            len(first_answered),
+        )
+        m["repair.supported_but_wrong.after"] = m["supported_but_wrong_rate"]
     m["baseline.relevance_accuracy"] = Metric(
         sum(r.baseline_relevance == r.gold_relevance for r in real), len(real)
     )
@@ -236,22 +303,41 @@ def run_eval(
     effort: str,
     max_tokens: int,
     regex_visible: set[str],
+    max_repairs: int = 0,
+    prompt: str = "v1",
+    related_for: Callable[[EvalItem], str] = lambda item: "",
 ) -> tuple[list[ItemResult], list[str]]:
     """Returns (results, ids skipped because unlabeled). Raises MissingCacheError offline."""
     labeled = [i for i in items if i.gold.labels is not None]
     skipped = [i.gold.id for i in items if i.gold.labels is None]
     if client is None:
-        _, version = load_prompt()
+        _, version = load_prompt(prompt)
         missing = [
             i.gold.id
             for i in labeled
-            if cache.get(ResponseCache.key(version, model, effort, content_hash(i.input_text)))
+            if cache.get(
+                ResponseCache.key(
+                    version, model, effort, model_input_hash(i.input_text, related_for(i))
+                )
+            )
             is None
         ]
         if missing:
             raise MissingCacheError(", ".join(missing))
     results = [
-        evaluate_item(i, cache, client, model, effort, max_tokens, regex_visible) for i in labeled
+        evaluate_item(
+            i,
+            cache,
+            client,
+            model,
+            effort,
+            max_tokens,
+            regex_visible,
+            max_repairs,
+            prompt,
+            related_for(i),
+        )
+        for i in labeled
     ]
     return results, skipped
 
@@ -266,8 +352,10 @@ def render_report(
     test_runs: int,
     freeze_note: str | None = None,
     agreement: str | None = None,
+    max_repairs: int = 0,
+    prompt: str = "v1",
 ) -> str:
-    _, version = load_prompt()
+    _, version = load_prompt(prompt)
     tokens_in = sum(r.input_tokens for r in results)
     tokens_out = sum(r.output_tokens for r in results)
     price_in, price_out = PRICES.get(model, (0.0, 0.0))
@@ -282,6 +370,16 @@ def render_report(
         f"- Tokens behind these responses: {tokens_in} in / {tokens_out} out "
         f"(about ${cost:.2f} at list price when they were generated; re-runs from cache are free)",
     ]
+    if results:
+        per_item = (tokens_in + tokens_out) / len(results)
+        lines.append(f"- Tokens per item: {per_item:.0f}")
+    if max_repairs and results:
+        lines.append(
+            f"- Repair loop: up to {max_repairs} repair call(s) per item; "
+            f"{sum(r.attempts for r in results) / len(results):.2f} attempts and "
+            f"{per_item:.0f} tokens per item; "
+            f"{sum(r.attempts > 1 for r in results)} item(s) got a repair call"
+        )
     if split == "test":
         lines.append(
             f"- Test split scored {test_runs} time(s). Numbers are only clean on the first."

@@ -24,6 +24,18 @@ guards:
 extractor:
   model: claude-sonnet-5-5
   effort: medium
+  # v2 adds up to related_chunks chunks of earlier source documents about the same rules
+  # (lexical retrieval, docs/AGENTIC.md section 2). v1 stays the default until the dev eval
+  # shows v2 helps: `spidercrawler eval --prompt v2`.
+  prompt: v1
+  related_chunks: 3
+
+# Verifier-feedback repair loop: after a verifier failure, show the model the reasons and
+# ask for a corrected output, at most this many times (0 = off, hard cap 2). Each repair
+# call counts against max_extractions_per_run. Off until the dev eval has measured it:
+# `spidercrawler eval --repair 1` (docs/AGENTIC.md section 1).
+repair:
+  max_repairs: 0
 
 # Contact email for the user agent. Override with SPIDERCRAWLER_CONTACT_EMAIL.
 # Live runs refuse to start while this is the placeholder.
