@@ -230,7 +230,7 @@ class Canonical(BaseModel):            # added by canonical.py
 - `stop_reason == "refusal"` or a schema validation error is an extraction error: no output is stored as valid, and the item routes to `needs_attention`.
 - The model is told it may say "unsure" and should when the text does not clearly say.
 - The summary must not tell anyone what they should do or whether they qualify.
-- Prompt file is versioned (`prompts/extract_v1.md`) and the version is stored on every extraction.
+- Prompt file is versioned (`prompts/extract_v1.md`) and the version is stored on every extraction. `extract_v2.md` (2026-11-16) adds a `<related_context>` block of retrieved source text; v1 is the default and is never edited.
 
 ### Verifier rules (plain code)
 

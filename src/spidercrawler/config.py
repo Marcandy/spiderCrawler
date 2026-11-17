@@ -47,6 +47,8 @@ class Guards(BaseModel):
 class Extractor(BaseModel):
     model: str = "claude-sonnet-5-5"
     effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    prompt: Literal["v1", "v2"] = "v1"  # v2 adds retrieved context (docs/AGENTIC.md section 2)
+    related_chunks: int = Field(default=3, ge=0, le=5)  # v2 only: chunks of related context
 
 
 class Repair(BaseModel):

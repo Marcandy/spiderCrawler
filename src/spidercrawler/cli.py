@@ -404,8 +404,15 @@ def eval_cmd(
         bool, typer.Option("--live", help="Call the API for responses missing from the cache.")
     ] = False,
     repair: Annotated[
-        int, typer.Option("--repair", min=0, max=2, help="Repair calls allowed per item.")
-    ] = 0,
+        int | None,
+        typer.Option("--repair", min=0, max=2, help="Repair calls per item (default: config)."),
+    ] = None,
+    prompt: Annotated[
+        str | None, typer.Option("--prompt", help="v1 or v2 (default: config). Dev only.")
+    ] = None,
+    data_dir: Annotated[
+        Path, typer.Option("--data-dir", help="Records to retrieve related context from (v2).")
+    ] = Path("data"),
     config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
     eval_dir: EvalDirOpt = Path("eval/items"),
     cache_dir: Annotated[Path, typer.Option("--cache-dir")] = Path("eval/cache"),
@@ -427,8 +434,16 @@ def eval_cmd(
     if split not in ("dev", "test"):
         raise typer.BadParameter("split must be dev or test")
     config = load_config(config_path)
+    repair = config.repair.max_repairs if repair is None else repair
+    prompt = prompt or config.extractor.prompt
+    if prompt not in ("v1", "v2"):
+        raise typer.BadParameter("prompt must be v1 or v2")
     freeze_note = None
     if split == "test":
+        # The test split scores the configured pipeline only; variants are compared on dev.
+        if (prompt, repair) != (config.extractor.prompt, config.repair.max_repairs):
+            typer.echo("error: --prompt and --repair variants are scored on dev only", err=True)
+            raise typer.Exit(2)
         # Reported numbers come from a frozen split only (PLAN.md section 8).
         state = freeze_state(eval_dir)
         if not state.intact:
@@ -450,6 +465,7 @@ def eval_cmd(
 
         client = anthropic.Anthropic()
     model, effort = config.extractor.model, config.extractor.effort
+    related_for = _related_for(data_dir, config) if prompt == "v2" else (lambda item: "")
     try:
         results, skipped = run_eval(
             load_items(eval_dir, split),  # type: ignore[arg-type]
@@ -460,6 +476,8 @@ def eval_cmd(
             config.limits.max_output_tokens,
             set(INJECTIONS[:REGEX_VISIBLE_INJECTIONS]),
             repair,
+            prompt,
+            related_for,
         )
     except MissingCacheError as exc:
         typer.echo(f"error: no cached response for: {exc}. Run `make eval-live` first.", err=True)
@@ -477,10 +495,130 @@ def eval_cmd(
         freeze_note=freeze_note,
         agreement=render_agreement(pairs) if pairs[0].n else None,
         max_repairs=repair,
+        prompt=prompt,
     )
     reports_dir.mkdir(parents=True, exist_ok=True)
-    (reports_dir / f"{split}.md").write_text(report, encoding="utf-8")
-    (reports_dir / f"{split}.json").write_text(results_json(results) + "\n", encoding="utf-8")
+    name = split if prompt == "v1" else f"{split}-{prompt}"  # v1 and v2 reports sit side by side
+    (reports_dir / f"{name}.md").write_text(report, encoding="utf-8")
+    (reports_dir / f"{name}.json").write_text(results_json(results) + "\n", encoding="utf-8")
+    typer.echo(report)
+
+
+def _related_for(data_dir: Path, config):
+    """Related context for an eval item, retrieved exactly as the pipeline would."""
+    from spidercrawler.extractor import related_block
+    from spidercrawler.records import Item
+    from spidercrawler.retrieval import open_index, related_context
+
+    records = RecordStore(data_dir)
+    index = open_index(records, config.sources)
+    items = {i.id: i for i in records.iter(Item)}
+
+    def related_for(item) -> str:
+        known = items.get(item.gold.item_id)
+        if known is None:
+            return ""
+        chunks = related_context(known, index, config.sources, config.extractor.related_chunks)
+        return related_block(chunks)
+
+    return related_for
+
+
+@app.command()
+def search(
+    query: Annotated[str, typer.Argument(help="Words to look for.")],
+    rule: Annotated[
+        str | None, typer.Option("--rule", help='Exact rule id, e.g. 632 or "Pa.R.Crim.P. 632".')
+    ] = None,
+    k: Annotated[int, typer.Option("-k", min=1, max=50, help="How many chunks.")] = 5,
+    data_dir: DataOpt = Path("data"),
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+) -> None:
+    """Search every document and title the monitor has recorded (lexical, BM25)."""
+    from spidercrawler.retrieval import canonical_rule_filter, open_index
+
+    index = open_index(RecordStore(data_dir), load_config(config_path).sources)
+    hits = index.search(query, k, rule_ids=[canonical_rule_filter(rule)] if rule else None)
+    if not hits:
+        typer.echo("no match")
+    for hit in hits:
+        chunk = hit.chunk
+        where = chunk.url or f"title, {chunk.table} table"
+        typer.echo(f"\n[{hit.score:.2f}] {chunk.item_id} {chunk.id} ({where})")
+        typer.echo(f"  rules: {', '.join(chunk.rule_ids) or 'none'}")
+        typer.echo("  " + chunk.text[:400].replace("\n", "\n  "))
+
+
+@app.command("eval-link")
+def eval_link(
+    item_id: Annotated[
+        str | None, typer.Argument(help="Adopted item to label (default: the next one).")
+    ] = None,
+    show_list: Annotated[
+        bool, typer.Option("--list", help="List proposed items in page order and exit.")
+    ] = False,
+    labeler: Annotated[str, typer.Option(help="Name recorded on the label.")] = "maintainer",
+    data_dir: DataOpt = Path("data"),
+    links_dir: Annotated[Path, typer.Option("--links-dir")] = Path("eval/links"),
+) -> None:
+    """Label which item is an adoption's proposal. Shows no candidate and no retriever
+    output; a person types the id."""
+    from spidercrawler import eval_links as tools
+    from spidercrawler.detector import load_known
+
+    known = sorted(load_known(RecordStore(data_dir)).values(), key=lambda k: k.item.id)
+    items = {k.item.id: k.item for k in known}
+    if show_list:
+        for k_ in known:
+            if k_.current_table != "approved":
+                typer.echo(f"{k_.item.id}  {k_.item.row_date_literal or '-':<20} {k_.item.title}")
+        return
+    done = tools.load_links(links_dir)
+    todo = [k_.item for k_ in known if k_.current_table == "approved" and k_.item.id not in done]
+    item = items.get(item_id) if item_id else (todo[0] if todo else None)
+    if item is None:
+        typer.echo("no such item" if item_id else "nothing left to link")
+        raise typer.Exit(2 if item_id else 0)
+    label = tools.label_link(
+        item,
+        items,
+        labeler,
+        ask=lambda text: typer.prompt(text, default="", show_default=False),
+        say=typer.echo,
+    )
+    if label is None:
+        typer.echo("not saved")
+        raise typer.Exit(1)
+    typer.echo(f"saved {tools.save_link(links_dir, label)}")
+
+
+@app.command("eval-retrieval")
+def eval_retrieval(
+    k: Annotated[int, typer.Option("-k", min=1, max=20)] = 5,
+    data_dir: DataOpt = Path("data"),
+    links_dir: Annotated[Path, typer.Option("--links-dir")] = Path("eval/links"),
+    reports_dir: Annotated[Path, typer.Option("--reports-dir")] = Path("eval/reports"),
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+) -> None:
+    """Score `related_items` against the hand-labeled links: recall@k and MRR."""
+    from spidercrawler import eval_links as tools
+    from spidercrawler.records import Item
+    from spidercrawler.retrieval import open_index, related_items
+
+    records, sources = RecordStore(data_dir), load_config(config_path).sources
+    items = {i.id: i for i in records.iter(Item)}
+    index = open_index(records, sources)
+
+    def rank(item_id: str) -> list[str]:
+        if item_id not in items:
+            return []
+        return [link.item_id for link in related_items(items[item_id], index, items, sources, k)]
+
+    report = tools.render_score(
+        tools.score_links(list(tools.load_links(links_dir).values()), rank, k)
+    )
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "retrieval.md").write_text(report, encoding="utf-8")
     typer.echo(report)
 
 
@@ -597,15 +735,20 @@ def review_notice(
 @app.command()
 def cache(
     data_dir: DataOpt = Path("data"),
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
     db: Annotated[Path, typer.Option("--db")] = Path(".cache/spidercrawler.sqlite"),
 ) -> None:
-    """Rebuild the SQLite query cache from the JSON records (for ad-hoc SQL)."""
+    """Rebuild the SQLite query cache and the search index from the JSON records."""
+    from spidercrawler.corpus import build_chunks
+    from spidercrawler.retrieval import FtsIndex
     from spidercrawler.store import rebuild
 
-    conn = rebuild(RecordStore(data_dir), db)
+    records = RecordStore(data_dir)
+    conn = rebuild(records, db)
+    FtsIndex.build(build_chunks(records, load_config(config_path).sources), conn)
     counts = {
         t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
-        for t in ("items", "documents", "extractions", "reviews", "runs")
+        for t in ("items", "documents", "extractions", "reviews", "runs", "chunks")
     }
     conn.close()
     typer.echo(f"rebuilt {db}: " + ", ".join(f"{n} {t}" for t, n in counts.items()))
