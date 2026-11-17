@@ -13,6 +13,11 @@
 <ul class="flags">{% for f in ext.flags %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
 {% if ext.verifier_notes %}<h2>Verifier reasons</h2>
 <ul class="notes">{% for n in ext.verifier_notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+{% if attempts|length > 1 %}<h2>Repair history: the model was shown the verifier's reasons</h2>
+<p>This output was revised after feedback from the checker. A real quote can still sit under a wrong claim; read it against the source.</p>
+<ol>{% for a in attempts %}<li>Attempt {{ a.number }}: verifier <strong>{{ a.verifier_status }}</strong>{% if a.error %} ({{ a.error }}){% endif %}
+{% if a.fed_back %}<br>Shown to the model before this attempt:<ul class="notes">{% for r in a.fed_back %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+{% if a.verifier_reasons and a.verifier_status == "fail" %}Failed on:<ul class="notes">{% for r in a.verifier_reasons %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}</li>{% endfor %}</ol>{% endif %}
 {% if ext.error %}<p class="error">Extraction error: {{ ext.error }}. Write the output by hand below if needed.</p>{% endif %}
 
 <h2>Decide</h2>

@@ -8,6 +8,7 @@ A refusal, truncation, or schema violation is an extraction error, never partial
 import hashlib
 import json
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -64,8 +65,11 @@ class LLMClient(Protocol):
 class CallResult:
     output: dict | None
     error: str | None
-    input_tokens: int
+    input_tokens: int  # everything billed as input: uncached, cache writes, and cache reads
     output_tokens: int
+    cache_read_tokens: int = 0  # the part of input_tokens served from the prompt cache
+    stop_reason: str | None = None
+    latency_ms: int = 0
 
 
 class ResponseCache:
@@ -78,8 +82,20 @@ class ResponseCache:
         return self.root / f"{key}.json"
 
     @staticmethod
-    def key(prompt_version: str, model: str, effort: str, input_hash: str) -> str:
-        raw = "\x1f".join([prompt_version, model, effort, SCHEMA_VERSION, input_hash])
+    def key(
+        prompt_version: str,
+        model: str,
+        effort: str,
+        input_hash: str,
+        attempt: int = 1,
+        feedback_hash: str = "",
+    ) -> str:
+        """A repair attempt answers a longer conversation, so its number and a hash of the
+        feedback it was sent are part of the key. First-attempt keys are unchanged."""
+        parts = [prompt_version, model, effort, SCHEMA_VERSION, input_hash]
+        if attempt > 1:
+            parts += [str(attempt), feedback_hash]
+        raw = "\x1f".join(parts)
         return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
     def get(self, key: str) -> CallResult | None:
@@ -102,34 +118,67 @@ def call_model(
     max_tokens: int,
 ) -> CallResult:
     """One structured-output call. No sampling params and no forced tool_choice (both 400)."""
+    messages = [{"role": "user", "content": user}]
+    return call_conversation(client, system, messages, model, effort, max_tokens)[0]
+
+
+def call_conversation(
+    client: LLMClient,
+    system: str,
+    messages: list[dict],
+    model: str,
+    effort: str,
+    max_tokens: int,
+) -> tuple[CallResult, Any]:
+    """One call on a conversation. Returns the result and the assistant content to replay.
+
+    A follow-up turn must send the assistant content back unchanged (it can hold thinking
+    blocks), so the raw content is returned beside the parsed result. The system prompt is
+    marked cacheable; a prefix under the model's minimum is simply not cached.
+    """
+    started = time.monotonic()
     response = client.messages.parse(
         model=model,
         max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+        messages=messages,
         output_config={"effort": effort},
         output_format=ChangeSummary,
     )
     usage = getattr(response, "usage", None)
-    tokens_in = getattr(usage, "input_tokens", 0) or 0
-    tokens_out = getattr(usage, "output_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
     stop = getattr(response, "stop_reason", None)
+
+    def result(output: dict | None, error: str | None) -> CallResult:
+        return CallResult(
+            output,
+            error,
+            (getattr(usage, "input_tokens", 0) or 0)
+            + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
+            + cache_read,
+            getattr(usage, "output_tokens", 0) or 0,
+            cache_read,
+            stop,
+            int((time.monotonic() - started) * 1000),
+        )
+
+    content = getattr(response, "content", None)
     if stop == "refusal":
         details = getattr(response, "stop_details", None)
         category = getattr(details, "category", None) if details else None
-        return CallResult(None, f"refusal ({category})", tokens_in, tokens_out)
+        return result(None, f"refusal ({category})"), content
     if stop == "max_tokens":
-        return CallResult(None, "truncated at max_tokens", tokens_in, tokens_out)
+        return result(None, "truncated at max_tokens"), content
     parsed = getattr(response, "parsed_output", None)
     if parsed is None:
-        return CallResult(None, f"no parsed output (stop_reason={stop})", tokens_in, tokens_out)
+        return result(None, f"no parsed output (stop_reason={stop})"), content
     try:
         summary = ChangeSummary.model_validate(
             parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
         )
     except ValidationError as exc:
-        return CallResult(None, f"schema: {exc.error_count()} errors", tokens_in, tokens_out)
-    return CallResult(summary.model_dump(mode="json"), None, tokens_in, tokens_out)
+        return result(None, f"schema: {exc.error_count()} errors"), content
+    return result(summary.model_dump(mode="json"), None), content
 
 
 def build_extraction(
@@ -143,6 +192,7 @@ def build_extraction(
     row: RowContext | None,
     rule_prefix: str,
     document_flags: list[str],
+    attempt_ids: list[str] | None = None,
 ) -> Extraction:
     """Canonicalize, verify, and route a model result into an Extraction record."""
     input_hash = content_hash(source_text)
@@ -178,5 +228,6 @@ def build_extraction(
         queue_status=route(status, confidence, relevance),
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
+        attempt_ids=attempt_ids or [],
         created_at=utcnow(),
     )

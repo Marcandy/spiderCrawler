@@ -1,7 +1,7 @@
-"""One run end to end: fetch → parse → health → detect → PDF text → run record.
+"""One run end to end: fetch → parse → health → detect → PDF text → extract → run record.
 
-The extractor is added in Day 2. A failing source never stops the run; a broken source
-makes the run status `failed` so the scheduled job alerts.
+A failing source never stops the run; a broken source makes the run status `failed` so the
+scheduled job alerts. Every step is timed into a trace written beside the run record.
 """
 
 import re
@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import anthropic
 
 from spidercrawler.budget import Budget
+from spidercrawler.canonical import canonicalize
 from spidercrawler.config import Config, Source
 from spidercrawler.detector import KnownItem, detect, load_known
 from spidercrawler.extractor import (
@@ -18,7 +19,7 @@ from spidercrawler.extractor import (
     LLMClient,
     build_extraction,
     build_user_message,
-    call_model,
+    call_conversation,
     load_prompt,
 )
 from spidercrawler.fetcher import Fetcher, FetchError, RequestCapError
@@ -34,8 +35,15 @@ from spidercrawler.records import (
     Run,
     utcnow,
 )
-from spidercrawler.schema import SCHEMA_VERSION
-from spidercrawler.verifier import RowContext
+from spidercrawler.repair import (
+    attempt_records,
+    combined_result,
+    repair_flags,
+    run_attempts,
+)
+from spidercrawler.schema import SCHEMA_VERSION, ChangeSummary
+from spidercrawler.trace import Trace
+from spidercrawler.verifier import RowContext, verify
 
 # Context committees' items are only worth reading if they touch criminal rules.
 _CRIMINAL_REF = re.compile(r"Crim\.?\s*P|Criminal", re.IGNORECASE)
@@ -73,10 +81,12 @@ def run_pipeline(
     checked = 0
     found = 0
     cap_hit = False
+    trace = Trace()
 
     for source in config.sources:
         try:
-            page = fetcher.get(config.source_url(source), validators.get(source.id))
+            with trace.step("fetch", source_id=source.id):
+                page = fetcher.get(config.source_url(source), validators.get(source.id))
         except RequestCapError as exc:
             errors.append(f"{source.id}: {exc}; remaining sources skipped")
             cap_hit = True
@@ -89,16 +99,19 @@ def run_pipeline(
         if page.not_modified:
             continue
 
-        parsed = parse_committee_page(page.content.decode("utf-8", "replace"), page.url)
-        known_here = sum(1 for k in known.values() if k.item.source_id == source.id)
-        health = check_health(parsed, known_here)
+        with trace.step("parse", source_id=source.id) as event:
+            parsed = parse_committee_page(page.content.decode("utf-8", "replace"), page.url)
+            known_here = sum(1 for k in known.values() if k.item.source_id == source.id)
+            health = check_health(parsed, known_here)
+            event["outcome"] = "ok" if health.ok else "broken"
         if not health.ok:
             broken.append(source.id)
             errors.extend(f"{source.id}: broken: {reason}" for reason in health.reasons)
             continue  # keep old validators so the page is re-read next run
 
         seeding = seed and (seed_only is None or source.id in seed_only)
-        detection = detect(source.id, parsed.rows, known, run_id, seeding)
+        with trace.step("detect", source_id=source.id):
+            detection = detect(source.id, parsed.rows, known, run_id, seeding)
         if not seeding:  # seeding is how the maintainer accepts a page that tripped a guard
             volume = check_volume(
                 rows=len(parsed.rows),
@@ -124,12 +137,12 @@ def run_pipeline(
         validators[source.id] = page.validators
         rows_seen[source.id] = len(parsed.rows)
 
-    documents = 0 if cap_hit else fetch_documents(config, records, fetcher, errors)
+    documents = 0 if cap_hit else fetch_documents(config, records, fetcher, errors, trace=trace)
     extraction_stats = (0, 0, 0)
     if llm is None:
         errors.append("extraction skipped: no LLM client (set ANTHROPIC_API_KEY)")
     else:
-        extraction_stats = _extract(config, records, known, llm, errors)
+        extraction_stats = _extract(config, records, known, llm, errors, trace)
     extracted, blocked, tokens = extraction_stats
 
     run = Run(
@@ -151,6 +164,7 @@ def run_pipeline(
         status=_status(config, broken, unreachable, checked),
     )
     records.write(run)
+    trace.write(records, run_id)
     return run
 
 
@@ -171,11 +185,13 @@ def fetch_documents(
     fetcher: Fetcher,
     errors: list[str],
     wanted: set[str] | None = None,
+    trace: Trace | None = None,
 ) -> int:
     """Fetch PDFs for items that need them and lack them. Leftovers wait for the next run.
 
     `wanted` (item ids) overrides the normal rule, e.g. to collect historical eval items.
     """
+    trace = trace or Trace()
     sources = {s.id: s for s in config.sources}
     have = {(d.item_id, d.url) for d in records.iter(Document)}
     fetched = 0
@@ -191,8 +207,12 @@ def fetch_documents(
             if (item.id, url) in have:
                 continue
             try:
-                result = fetcher.get(url)
-                pdf = extract_pdf_text(result.content)
+                with trace.step("fetch", item_id=item.id):
+                    result = fetcher.get(url)
+                with trace.step("pdf_text", item_id=item.id) as event:
+                    pdf = extract_pdf_text(result.content)
+                    flags = [f for f in ("markup_lost", "no_text") if getattr(pdf, f)]
+                    event["outcome"] = "+".join(flags) or "ok"
             except RequestCapError as exc:
                 errors.append(f"documents: {exc}; rest wait for next run")
                 return fetched
@@ -224,6 +244,7 @@ def _extract(
     known: dict[str, KnownItem],
     llm: LLMClient,
     errors: list[str],
+    trace: Trace,
 ) -> tuple[int, int, int]:
     """Extract every eligible item that has all its documents and no current extraction.
 
@@ -258,37 +279,59 @@ def _extract(
         )
         if records.exists(Extraction, ext_id):
             continue
+        ids = {"item_id": item.id, "extraction_id": ext_id}
+        attempts = []
         if "no_text" in doc_flags:
-            result = None  # nothing to read; a human looks at the PDF
+            result = CallResult(None, "no_text: document has no text layer", 0, 0)
         elif not budget.try_start(source_text):
             errors.append(f"extraction stopped: {budget.stopped_reason}; rest wait for next run")
             break
         else:
+
+            def call(messages: list[dict], number: int, digest: str):
+                return call_conversation(
+                    llm, system, messages, model, effort, config.limits.max_output_tokens
+                )
+
+            def check(output: dict, row=row, prefix=prefix, source_text=source_text):
+                summary = ChangeSummary.model_validate(output)
+                verdict = verify(summary, canonicalize(summary, prefix), source_text, row)
+                return verdict.status, verdict.reasons
+
             try:
-                result = call_model(
-                    llm,
-                    system,
+                attempts = run_attempts(
+                    call,
+                    check,
                     build_user_message(source_text, row),
-                    model,
-                    effort,
-                    config.limits.max_output_tokens,
+                    max_repairs=config.repair.max_repairs,
+                    budget=budget,
+                    trace=trace,
+                    ids=ids,
                 )
             except anthropic.APIError as exc:  # record and keep going; our own bugs still raise
                 errors.append(f"{item.id}: extraction call failed: {exc}")
                 continue
-            budget.record(result.input_tokens, result.output_tokens)
-        extraction = build_extraction(
-            item.id,
-            source_text,
-            result or CallResult(None, "no_text: document has no text layer", 0, 0),
-            model=model,
-            effort=effort,
-            prompt_version=prompt_version,
-            row=row,
-            rule_prefix=prefix,
-            document_flags=doc_flags,
-        )
+            result = combined_result(attempts)
+        attempt_recs = attempt_records(attempts, ext_id, item.id)
+        with trace.step("route", **ids) as event:
+            extraction = build_extraction(
+                item.id,
+                source_text,
+                result,
+                model=model,
+                effort=effort,
+                prompt_version=prompt_version,
+                row=row,
+                rule_prefix=prefix,
+                document_flags=doc_flags + repair_flags(attempts),
+                attempt_ids=[a.id for a in attempt_recs],
+            )
+            event["outcome"] = extraction.queue_status
+        # The extraction first: if the run dies between the two, the item is not re-extracted
+        # into attempt ids that already hold a different (non-deterministic) output.
         records.write(extraction)
-        made += result is not None
+        for record in attempt_recs:
+            records.write(record)
+        made += bool(attempts)
         blocked += extraction.queue_status == "blocked"
     return made, blocked, budget.tokens_used

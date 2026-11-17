@@ -49,11 +49,18 @@ class Extractor(BaseModel):
     effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
 
 
+class Repair(BaseModel):
+    """Verifier-feedback repair loop (docs/AGENTIC.md section 1). 0 turns it off."""
+
+    max_repairs: int = Field(default=0, ge=0, le=2)  # hard cap: 2 repair calls per item
+
+
 class Config(BaseModel):
     base_url: HttpUrl
     limits: Limits = Limits()
     guards: Guards = Guards()
     extractor: Extractor = Extractor()
+    repair: Repair = Repair()
     contact_email: str = PLACEHOLDER_EMAIL
     sources: list[Source]
 

@@ -403,6 +403,9 @@ def eval_cmd(
     live: Annotated[
         bool, typer.Option("--live", help="Call the API for responses missing from the cache.")
     ] = False,
+    repair: Annotated[
+        int, typer.Option("--repair", min=0, max=2, help="Repair calls allowed per item.")
+    ] = 0,
     config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
     eval_dir: EvalDirOpt = Path("eval/items"),
     cache_dir: Annotated[Path, typer.Option("--cache-dir")] = Path("eval/cache"),
@@ -456,6 +459,7 @@ def eval_cmd(
             effort,
             config.limits.max_output_tokens,
             set(INJECTIONS[:REGEX_VISIBLE_INJECTIONS]),
+            repair,
         )
     except MissingCacheError as exc:
         typer.echo(f"error: no cached response for: {exc}. Run `make eval-live` first.", err=True)
@@ -472,6 +476,7 @@ def eval_cmd(
         test_runs,
         freeze_note=freeze_note,
         agreement=render_agreement(pairs) if pairs[0].n else None,
+        max_repairs=repair,
     )
     reports_dir.mkdir(parents=True, exist_ok=True)
     (reports_dir / f"{split}.md").write_text(report, encoding="utf-8")
@@ -538,7 +543,36 @@ def summary(data_dir: DataOpt = Path("data")) -> None:
     ]
     if run.errors:
         lines += ["", "### Errors and notes", ""] + [f"- {e}" for e in run.errors]
+    lines += [
+        "",
+        f"Step-by-step trace: `data/traces/{run.id}.jsonl` on the `data` branch, or "
+        f"`spidercrawler trace {run.id}`. It holds ids, timings, and token counts only.",
+    ]
     typer.echo("\n".join(lines))
+
+
+@app.command()
+def trace(
+    run_id: Annotated[str | None, typer.Argument(help="Run id; the latest run if omitted.")] = None,
+    data_dir: DataOpt = Path("data"),
+) -> None:
+    """Print one run's trace: each step with its outcome, duration, and token counts."""
+    from spidercrawler.records import Run
+    from spidercrawler.trace import read_trace, render
+
+    records = RecordStore(data_dir)
+    known = {r.id for r in records.iter(Run)}  # the id is looked up, never used as a path
+    latest = records.latest_run()
+    run_id = run_id or (latest.id if latest else None)
+    if run_id not in known:
+        typer.echo("error: no such run", err=True)
+        raise typer.Exit(2)
+    try:
+        events = read_trace(records, run_id)
+    except FileNotFoundError:
+        typer.echo(f"error: {run_id} has no trace (it predates tracing)", err=True)
+        raise typer.Exit(2) from None
+    typer.echo(render(events))
 
 
 @app.command("review-notice")
