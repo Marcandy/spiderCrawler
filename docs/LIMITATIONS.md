@@ -52,6 +52,16 @@ Read this before relying on anything this tool produces.
 - The server labels unreviewed output and neutralizes tag-like text, but a client model can
   still repeat what it reads. Only `list_published` returns approved content.
 
+## Review assistant
+
+- Advisory only, and it can be wrong in both directions: it can miss a real error and flag a
+  correct output. Its evidence quotes are checked in code; its judgements are not.
+- With the default config it uses the same model as the extractor, which tends to agree with
+  itself. A different `assistant.model` makes the comparison possible.
+- It reads untrusted court text while holding tools. The tools are read-only and local, so an
+  injected instruction can at worst skew the brief or escalate an item for a person.
+- **Not scored yet.** It has never run against the real API; the eval needs labeled items.
+
 ## Data and parsing
 
 - PDF text extraction can miss underlined additions in some documents. Those documents are
