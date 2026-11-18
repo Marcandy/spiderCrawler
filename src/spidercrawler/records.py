@@ -134,8 +134,10 @@ class Extraction(Record):
     flags: list[str] = Field(default_factory=list)  # suspicious_input, markup_lost, ...
     confidence: str | None
     queue_status: QueueStatus
-    input_tokens: int = 0
+    input_tokens: int = 0  # summed over every attempt
     output_tokens: int = 0
+    # One per model call, oldest first. Empty on records written before the repair loop.
+    attempt_ids: list[str] = Field(default_factory=list)
     created_at: datetime
 
     @staticmethod
@@ -170,7 +172,41 @@ class Review(Record):
         return f"rev-{extraction_id}-{decided_at.strftime('%Y%m%dT%H%M%S%fZ')}"
 
 
-RECORD_TYPES: tuple[type[Record], ...] = (Item, ItemEvent, Document, Run, Extraction, Review)
+class Attempt(Record):
+    """One model call for an extraction: what was sent (as a hash), what came back, and what
+    the verifier said. `fed_back` is the verifier reasons shown to the model in this call."""
+
+    kind: ClassVar[str] = "attempts"
+    item_id: str
+    extraction_id: str
+    number: int  # 1 is the first call; 2 and 3 are repair attempts
+    messages_hash: str
+    fed_back: list[str] = Field(default_factory=list)
+    output: dict | None
+    error: str | None
+    verifier_status: VerifierStatus
+    verifier_reasons: list[str] = Field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    latency_ms: int = 0
+    stop_reason: str | None = None
+    created_at: datetime
+
+    @staticmethod
+    def make_id(extraction_id: str, number: int, messages_hash: str) -> str:
+        return "att-" + short_hash(extraction_id, str(number), messages_hash)
+
+
+RECORD_TYPES: tuple[type[Record], ...] = (
+    Item,
+    ItemEvent,
+    Document,
+    Run,
+    Extraction,
+    Review,
+    Attempt,
+)
 
 
 class RecordConflictError(Exception):
@@ -206,6 +242,21 @@ class RecordStore:
         finally:
             os.unlink(tmp)
         return True
+
+    def write_lines(self, kind: str, record_id: str, lines: list[dict]) -> Path:
+        """Write a JSON Lines file once (`<kind>/<id>.jsonl`). Never overwrites."""
+        path = self.root / kind / f"{record_id}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.writelines(json.dumps(line, sort_keys=True) + "\n" for line in lines)
+            os.link(tmp, path)
+        except FileExistsError:
+            raise RecordConflictError(f"{kind}/{record_id}.jsonl already exists") from None
+        finally:
+            os.unlink(tmp)
+        return path
 
     def exists(self, record_type: type[Record], record_id: str) -> bool:
         return self.path_for(record_type.kind, record_id).exists()

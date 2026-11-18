@@ -47,6 +47,14 @@ class Guards(BaseModel):
 class Extractor(BaseModel):
     model: str = "claude-sonnet-5-5"
     effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    prompt: Literal["v1", "v2"] = "v1"  # v2 adds retrieved context (docs/AGENTIC.md section 2)
+    related_chunks: int = Field(default=3, ge=0, le=5)  # v2 only: chunks of related context
+
+
+class Repair(BaseModel):
+    """Verifier-feedback repair loop (docs/AGENTIC.md section 1). 0 turns it off."""
+
+    max_repairs: int = Field(default=0, ge=0, le=2)  # hard cap: 2 repair calls per item
 
 
 class Config(BaseModel):
@@ -54,6 +62,7 @@ class Config(BaseModel):
     limits: Limits = Limits()
     guards: Guards = Guards()
     extractor: Extractor = Extractor()
+    repair: Repair = Repair()
     contact_email: str = PLACEHOLDER_EMAIL
     sources: list[Source]
 

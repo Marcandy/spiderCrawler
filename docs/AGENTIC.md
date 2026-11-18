@@ -12,11 +12,60 @@ keeps the human gate as the only path to a public surface.
 
 ## 1. Verifier-feedback repair loop and run trace
 
-_Not built yet._
+**What it does.** When the verifier fails an output, `repair.py` sends a follow-up turn in the
+same conversation: the model's output, the verifier's reasons inside `<verifier_findings>`
+tags, and a request for a corrected output. It stops when an attempt passes, when the reasons
+do not shrink, when the budget refuses, or after 2 repair calls (hard cap). Every model call
+is an `attempts/` record; every run writes `traces/<run_id>.jsonl` (`spidercrawler trace`).
+
+**Design choices.**
+- Only rules 1–6 are fed back. Rule 8 compares the output with the committee page; told
+  "your date differs from the page's", the model could copy the page and the cross-check
+  would check nothing. Any rule 8 reason sends the item to a person unrepaired. (The listing
+  the model sees already shows the page's date column, so rule 8 was never fully independent.)
+- A repaired pass is flagged `repaired:N` and routes to `needs_attention`, never
+  `ready_for_review`. The review page lists each attempt and what the model was shown.
+- Rejected: retrying refusals or truncation, and a separate repair budget (each repair call
+  counts against the 20 calls per run).
+- The trace accepts a fixed set of fields; strings must look like an id or a short code.
+- Prompt caching: the system prompt is an estimated 600–800 tokens against a 512-token
+  minimum listed for `claude-sonnet-5-5`. It is marked cacheable and each attempt records
+  `cache_read_tokens`. Whether it hits is unknown until a live run.
+
+**Measured.** `eval --repair 1` on dev: block rate and supported-but-wrong rate before and
+after, attempts and tokens per item. **Pending labels.** Repair is off by default until then.
+
+**Does not prove.** A repaired output passed a checker it was told how to pass: its quotes
+exist. If blocked items turn into supported-but-wrong items, the loop is a regression.
 
 ## 2. Retrieval over the rule corpus
 
-_Not built yet._
+**What it does.** `corpus.py` chunks every stored document (on rule headings, then
+paragraphs) and every item title. `retrieval.py` indexes the chunks with SQLite FTS5 (BM25).
+`spidercrawler search` queries it; `related_items` links an item to earlier items on the same
+rules and shows the reason on the review page; prompt `extract_v2` can add up to 3 retrieved
+chunks in a `<related_context>` block.
+
+**Design choices.**
+- Lexical, not semantic: no embeddings, no second vendor, no new dependency. An `Embedder`
+  protocol exists and is not implemented; a vendor should arrive with a comparison.
+- Rule-id filters match canonical ids stored as metadata, never text, so 632 is not 6320.
+- Only `Document` text and `Item` titles are indexed. A model output is never retrieved,
+  reviewed or not: summaries feeding summaries would be a feedback loop.
+- Retrieved text is a second injection channel. It is neutralized and delimited like the
+  source, a `suspicious_related_context` flag is raised, and it counts against the budget.
+- The verifier is unchanged: a quote lifted from related context is not in the source and
+  fails rule 2. Rejected: letting quotes cite related documents (the verifier would have to
+  trust retrieval).
+- Related items are those seen no later than the item. Seeded history shares one run, so
+  within it "earlier" is not known.
+
+**Measured.** `eval-retrieval`: recall@k and MRR against links typed by the owner
+(`eval-link`, which shows no candidate). `eval --prompt v2` against v1 on dev: field
+accuracy, supported-but-wrong, tokens per item. **Both pending labels.** v1 stays the default.
+
+**Does not prove.** That retrieval helps. Seeded items have titles and no documents, so the
+document corpus starts near empty; "no measurable gain" is a likely first result.
 
 ## 3. Read-only MCP server
 
