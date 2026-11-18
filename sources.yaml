@@ -37,6 +37,17 @@ extractor:
 repair:
   max_repairs: 0
 
+# Review assistant: a read-only, tool-using second opinion on each extraction, shown to the
+# reviewer as "AI second opinion, not verified". It can only move an item from
+# ready_for_review to needs_attention. Each model turn counts against the run budget.
+# `spidercrawler assist <extraction_id>` runs it by hand. model: "" means the extractor's.
+assistant:
+  in_pipeline: false
+  model: ""
+  effort: medium
+  max_steps: 8
+  max_tokens: 80000
+
 # Contact email for the user agent. Override with SPIDERCRAWLER_CONTACT_EMAIL.
 # Live runs refuse to start while this is the placeholder.
 contact_email: CHANGE-ME@example.com

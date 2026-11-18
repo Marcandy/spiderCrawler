@@ -198,6 +198,39 @@ class Attempt(Record):
         return "att-" + short_hash(extraction_id, str(number), messages_hash)
 
 
+class Brief(Record):
+    """The review assistant's second opinion on one extraction. Advisory only: it can move
+    an item from ready_for_review to needs_attention, and nothing else.
+
+    `status` is "complete" or "cut_short". A cut-short brief keeps no findings: no brief is
+    better than a partial one presented as complete.
+    """
+
+    kind: ClassVar[str] = "briefs"
+    extraction_id: str
+    item_id: str
+    model_id: str
+    effort: str
+    prompt_version: str
+    status: Literal["complete", "cut_short"]
+    cut_reason: str | None = None
+    findings: list[dict] = Field(default_factory=list)  # each carries `verified` (quote check)
+    related_proposal_item_id: str | None = None
+    steps: int = 0
+    tool_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    created_at: datetime
+
+    @property
+    def escalates(self) -> bool:
+        return self.status == "complete" and any(f["kind"] != "consistent" for f in self.findings)
+
+    @staticmethod
+    def make_id(extraction_id: str, model_id: str, created_at: datetime) -> str:
+        return "brief-" + short_hash(extraction_id, model_id, created_at.isoformat())
+
+
 RECORD_TYPES: tuple[type[Record], ...] = (
     Item,
     ItemEvent,
@@ -206,6 +239,7 @@ RECORD_TYPES: tuple[type[Record], ...] = (
     Extraction,
     Review,
     Attempt,
+    Brief,
 )
 
 

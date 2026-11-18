@@ -2,7 +2,7 @@
 {% block title %}{{ item.title }}{% endblock %}
 {% block body %}
 <h1>{{ item.title }}</h1>
-<p><span class="status {{ ext.queue_status }}">{{ ext.queue_status }}</span>
+<p><span class="status {{ status }}">{{ status }}</span>{% if status != ext.queue_status %} (raised from {{ ext.queue_status }} by the AI second opinion){% endif %}
    verifier <strong>{{ ext.verifier_status }}</strong> · model <code>{{ ext.model_id }}</code> ({{ ext.effort }})
    · prompt <code>{{ ext.prompt_version }}</code> · page table <code>{{ row.table }}</code>, date column {{ row.date_literal or "none" }}</p>
 <p>Sources: {% for d in docs %}{% if d.url.startswith("https://") or d.url.startswith("http://") %}<a href="{{ d.url }}" rel="noopener noreferrer">{{ d.url.rsplit('/', 1)[-1] }}</a>{% else %}{{ d.url }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</p>
@@ -13,6 +13,12 @@
 <ul class="flags">{% for f in ext.flags %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
 {% if ext.verifier_notes %}<h2>Verifier reasons</h2>
 <ul class="notes">{% for n in ext.verifier_notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+{% if brief %}<div class="brief"><h2>AI second opinion, not verified</h2>
+<p>A second model read the sources with read-only tools. It can be wrong in both directions. It cannot approve, unblock, or change anything; you decide.
+Model <code>{{ brief.model_id }}</code> ({{ brief.effort }}), {{ brief.steps }} turn(s), {{ brief.tool_calls }} tool call(s).</p>
+{% if brief.status == "cut_short" %}<p class="error">Cut short ({{ brief.cut_reason }}). No findings are shown, because a partial review could read as complete.</p>
+{% else %}<ul>{% for f in brief.findings %}<li><strong>{{ f.kind }}</strong> · {{ f.field }} · {% if f.verified %}quote found in source{% else %}<span class="error">quote NOT found in source (unverified)</span>{% endif %}<br>{{ f.note }}{% if f.evidence_quote %}<br><q>{{ f.evidence_quote }}</q>{% endif %}</li>{% endfor %}</ul>
+{% if brief.related_proposal_item_id %}<p>Related proposal, per the assistant: <code>{{ brief.related_proposal_item_id }}</code></p>{% endif %}{% endif %}</div>{% endif %}
 {% if attempts|length > 1 %}<h2>Repair history: the model was shown the verifier's reasons</h2>
 <p>This output was revised after feedback from the checker. A real quote can still sit under a wrong claim; read it against the source.</p>
 <ol>{% for a in attempts %}<li>Attempt {{ a.number }}: verifier <strong>{{ a.verifier_status }}</strong>{% if a.error %} ({{ a.error }}){% endif %}

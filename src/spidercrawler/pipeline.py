@@ -170,6 +170,27 @@ def run_pipeline(
     return run
 
 
+def _second_opinion(config, records, llm, extraction, budget, trace) -> None:
+    """Optional, off by default: the review assistant, inside the same run budget."""
+    from spidercrawler.assistant import Bounds, assist
+    from spidercrawler.tools import Toolbox
+
+    settings = config.assistant
+    with trace.step("assist", item_id=extraction.item_id, extraction_id=extraction.id) as event:
+        brief = assist(
+            llm,
+            records,
+            Toolbox(records, config),
+            extraction,
+            model=settings.model or config.extractor.model,
+            effort=settings.effort,
+            bounds=Bounds(settings.max_steps, settings.max_tokens, config.limits.max_output_tokens),
+            budget=budget,
+            trace=trace,
+        )
+        event.update(outcome=brief.status, brief_id=brief.id)
+
+
 def _status(config: Config, broken: list[str], unreachable: list[str], checked: int) -> str:
     """Failed if any source is broken, nothing was checked, or the focus source was missed.
 
@@ -344,4 +365,10 @@ def _extract(
             records.write(record)
         made += bool(attempts)
         blocked += extraction.queue_status == "blocked"
+        if (
+            config.assistant.in_pipeline
+            and extraction.queue_status != "blocked"
+            and extraction.output
+        ):
+            _second_opinion(config, records, llm, extraction, budget, trace)
     return made, blocked, budget.tokens_used

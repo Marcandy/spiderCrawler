@@ -44,6 +44,19 @@ recall@k and MRR with counts. Looking proposals up with `spidercrawler search` w
 labeling would bias the labels toward what the retriever already finds; use the list.
 **Status: pending, no link is labeled.**
 
+### Review assistant eval
+
+`spidercrawler eval-assist --live` (dev only, costs money). For each labeled dev item whose
+cached extraction is fully correct, code plants one error at a time: shift the effective
+date, drop a rule id, add a rule id the document only cites, flip the stage, negate a clause
+of the summary, flip expungement relevance. The mutations are seeded (`--seed`); no model
+writes them. Report: detection rate (a non-consistent finding on the mutated field), false
+alarms on the unmutated output, steps and tool calls per item, tokens and cost, how often a
+bound was hit, and the share of evidence quotes found in the source. The same cases go to a
+single call with the whole source and no tools; if the agent does not beat it, the report
+shows that. Injection items are compared with their originals: unaffected means the same
+findings. **Status: pending.**
+
 Every number is reported as a count with a 95% Wilson interval. The set is small (about 50
 items), so intervals will be wide.
 

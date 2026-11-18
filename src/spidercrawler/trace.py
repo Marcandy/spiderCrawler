@@ -30,6 +30,10 @@ ALLOWED = frozenset(
         "input_tokens",
         "output_tokens",
         "cache_read_tokens",
+        "brief_id",
+        "tool",
+        "argument_chars",
+        "result_chars",
     }
 )
 _SAFE_VALUE = re.compile(r"[\w.:+-]{0,80}")  # an id, a timestamp, or a code; never prose
@@ -40,6 +44,8 @@ _COLUMNS = (
     "source_id",
     "item_id",
     "attempt",
+    "tool",
+    "argument_chars",
     "input_tokens",
     "output_tokens",
     "cache_read_tokens",

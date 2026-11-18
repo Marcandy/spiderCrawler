@@ -176,6 +176,9 @@ data/
                                 stop_reason (one per model call; added 2026-11-16)
   traces/<run_id>.jsonl         one line per step: ids, duration, outcome, token counts.
                                 Never document text (added 2026-11-16)
+  briefs/<brief_id>.json        extraction_id, model_id, status (complete / cut_short),
+                                findings (each with `verified`), steps, tool_calls, tokens.
+                                Advisory; escalates only (added 2026-11-17)
   runs/<run_id>.json            started_at, finished_at, sources_checked,
                                 items_found, extractions_made, blocked,
                                 errors, tokens_used, rows_seen, status

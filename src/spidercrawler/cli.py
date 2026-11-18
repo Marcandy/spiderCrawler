@@ -623,6 +623,55 @@ def eval_retrieval(
 
 
 @app.command()
+def assist(
+    extraction_id: Annotated[str, typer.Argument(help="The extraction to review.")],
+    data_dir: DataOpt = Path("data"),
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+) -> None:
+    """Ask the review assistant for a second opinion on one extraction (calls the API).
+
+    Writes one briefs/ record and its trace. Advisory: it can only raise an item from
+    ready_for_review to needs_attention."""
+    from spidercrawler.assistant import Bounds
+    from spidercrawler.assistant import assist as run
+    from spidercrawler.budget import Budget
+    from spidercrawler.records import Extraction
+    from spidercrawler.tools import Toolbox
+    from spidercrawler.trace import Trace
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.echo("error: assist needs ANTHROPIC_API_KEY", err=True)
+        raise typer.Exit(2)
+    config, records = load_config(config_path), RecordStore(data_dir)
+    ext = next((e for e in records.iter(Extraction) if e.id == extraction_id), None)
+    if ext is None or ext.output is None:
+        typer.echo("error: no extraction with that id and an output", err=True)
+        raise typer.Exit(2)
+    import anthropic
+
+    trace, settings = Trace(), config.assistant
+    brief = run(
+        anthropic.Anthropic(),
+        records,
+        Toolbox(records, config),
+        ext,
+        model=settings.model or config.extractor.model,
+        effort=settings.effort,
+        bounds=Bounds(settings.max_steps, settings.max_tokens, config.limits.max_output_tokens),
+        budget=Budget.from_limits(config.limits),
+        trace=trace,
+    )
+    trace.write(records, brief.id)
+    typer.echo(
+        f"{brief.id}: {brief.status} | {len(brief.findings)} finding(s), "
+        f"{sum(not f['verified'] for f in brief.findings)} unverified | "
+        f"{brief.steps} turn(s), {brief.tool_calls} tool call(s), "
+        f"{brief.input_tokens + brief.output_tokens} tokens"
+        + (f" | cut short: {brief.cut_reason}" if brief.cut_reason else "")
+    )
+
+
+@app.command()
 def mcp(
     data_dir: DataOpt = Path("data"),
     config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
@@ -632,6 +681,85 @@ def mcp(
     from spidercrawler.mcp_server import build_server
 
     build_server(RecordStore(data_dir), load_config(config_path)).run("stdio")
+
+
+@app.command("eval-assist")
+def eval_assist(
+    live: Annotated[
+        bool, typer.Option("--live", help="Run the assistant and the baseline (costs money).")
+    ] = False,
+    seed: Annotated[int, typer.Option(help="Seed for the planted mutations.")] = 7,
+    config_path: ConfigOpt = DEFAULT_SOURCES_PATH,
+    eval_dir: EvalDirOpt = Path("eval/items"),
+    cache_dir: Annotated[Path, typer.Option("--cache-dir")] = Path("eval/cache"),
+    reports_dir: Annotated[Path, typer.Option("--reports-dir")] = Path("eval/reports"),
+) -> None:
+    """Score the review assistant on planted errors in correct dev outputs, against a
+    single-call baseline. Dev only. Says pending until labeled items have cached outputs."""
+    import tempfile
+
+    from spidercrawler import assist_eval as ae
+    from spidercrawler.eval_data import INJECTIONS, REGEX_VISIBLE_INJECTIONS, load_items
+    from spidercrawler.evaluate import MissingCacheError, run_eval
+    from spidercrawler.extractor import ResponseCache
+
+    config = load_config(config_path)
+    items = load_items(eval_dir, "dev")
+    try:
+        results, _ = run_eval(
+            items,
+            ResponseCache(cache_dir),
+            None,
+            config.extractor.model,
+            config.extractor.effort,
+            config.limits.max_output_tokens,
+            set(INJECTIONS[:REGEX_VISIBLE_INJECTIONS]),
+        )
+    except MissingCacheError:
+        results = []
+    correct = {r.id for r in results if r.all_correct and not r.synthetic}
+    by_id = {i.gold.id: i for i in items}
+    cache = ResponseCache(cache_dir)
+    report = ae.render(None)
+    if correct and not live:
+        typer.echo("error: the assistant eval calls the API; rerun with --live", err=True)
+        raise typer.Exit(2)
+    if correct:
+        import anthropic
+
+        from spidercrawler.extractor import load_prompt
+        from spidercrawler.normalize import content_hash
+
+        client, (_, version) = anthropic.Anthropic(), load_prompt()
+        agent, baseline, pairs = [], [], []
+        with tempfile.TemporaryDirectory() as root:
+            for item_id in sorted(correct):
+                key = ResponseCache.key(
+                    version,
+                    config.extractor.model,
+                    config.extractor.effort,
+                    content_hash(by_id[item_id].input_text),
+                )
+                output = cache.get(key).output  # type: ignore[union-attr]
+                a, b = ae.run_cases(by_id[item_id], output, client, config, Path(root), seed)
+                agent += a
+                baseline += b
+                for inj in (i for i in items if i.gold.id.startswith(f"{item_id}-inj")):
+                    injected, _ = ae.run_cases(
+                        inj, output, client, config, Path(root), seed, mutate=False
+                    )
+                    pairs.append((a[0][1], injected[0][1]))
+        model = config.assistant.model or config.extractor.model
+        report = ae.render(
+            ae.score(agent),
+            ae.score(baseline),
+            ae.injection_unaffected(pairs) if pairs else None,
+            note=f"model `{model}`, effort `{config.assistant.effort}`, seed {seed}; "
+            f"about ${ae.cost_per_item(agent, model):.3f} per agent case",
+        )
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "dev-assist.md").write_text(report, encoding="utf-8")
+    typer.echo(report)
 
 
 @app.command()
@@ -706,12 +834,14 @@ def trace(
     run_id: Annotated[str | None, typer.Argument(help="Run id; the latest run if omitted.")] = None,
     data_dir: DataOpt = Path("data"),
 ) -> None:
-    """Print one run's trace: each step with its outcome, duration, and token counts."""
-    from spidercrawler.records import Run
+    """Print one run's (or one brief's) trace: each step with its outcome, duration, and
+    token counts."""
+    from spidercrawler.records import Brief, Run
     from spidercrawler.trace import read_trace, render
 
     records = RecordStore(data_dir)
-    known = {r.id for r in records.iter(Run)}  # the id is looked up, never used as a path
+    # The id is looked up, never used as a path. A brief from `assist` has its own trace.
+    known = {r.id for r in records.iter(Run)} | {b.id for b in records.iter(Brief)}
     latest = records.latest_run()
     run_id = run_id or (latest.id if latest else None)
     if run_id not in known:

@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from spidercrawler.canonical import canonicalize
 from spidercrawler.normalize import content_hash
-from spidercrawler.records import Extraction, QueueStatus, Review, utcnow
+from spidercrawler.records import Brief, Extraction, QueueStatus, Review, utcnow
 from spidercrawler.schema import ChangeSummary
 from spidercrawler.verifier import RowContext, VerifierResult, verify
 
@@ -24,6 +24,19 @@ def route(verifier_status: str, confidence: str | None, relevance: str | None) -
     if confidence == "low" or relevance == "unsure":
         return "needs_attention"
     return "ready_for_review"
+
+
+def effective_status(extraction: Extraction, briefs: list[Brief]) -> QueueStatus:
+    """The queue status a reviewer sees. A brief can only escalate: ready_for_review becomes
+    needs_attention when the newest complete brief disagrees with any field. Blocked stays
+    blocked and needs_attention stays needs_attention, whatever a brief says."""
+    mine = sorted(
+        (b for b in briefs if b.extraction_id == extraction.id and b.status == "complete"),
+        key=lambda b: b.created_at,
+    )
+    if extraction.queue_status == "ready_for_review" and mine and mine[-1].escalates:
+        return "needs_attention"
+    return extraction.queue_status
 
 
 class DecisionRefusedError(Exception):

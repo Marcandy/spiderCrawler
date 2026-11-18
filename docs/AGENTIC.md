@@ -97,4 +97,32 @@ repeating it. The human gate is still the control.
 
 ## 4. Review assistant (the one tool-using agent)
 
-_Not built yet._
+**What it does.** `assistant.py` gives a model the extraction under review and six read-only
+tools from the registry (`read_document`, `search_rules`, `related_items`, `check_quote`,
+`canonical_rule_ids`, `get_item`). It returns a `ReviewBrief`: per-field findings
+(`consistent`, `contradicted`, `unsupported`, `missing`), each with an evidence quote. Code
+then checks every quote with `quote_in_source`; a quote not in the source is kept, marked
+unverified. The brief is a `briefs/` record shown in a box titled "AI second opinion, not
+verified". `spidercrawler assist <id>` runs it; a pipeline step exists, off by default.
+
+**Design choices.**
+- A hand-written loop on `messages.parse` instead of the SDK's tool runner. The runner
+  would loop and execute tools for us; writing it out makes each rule testable: an 8-turn
+  cap, a per-brief token budget inside the run budget, an allowlist, parallel calls answered
+  in one message, unknown names, bad arguments, and raising tools returned as errors.
+- Fails closed. A bound, a refusal, or truncation stores a `cut_short` brief with no findings.
+- Escalate only. A complete brief with any non-consistent finding moves `ready_for_review`
+  to `needs_attention` (`router.effective_status`). It never unblocks, approves, edits the
+  extraction, or reaches the digest, the issue, or `list_published`. Each "never" is a test.
+- Why tools plus untrusted documents is acceptable here: the tools only read local records,
+  nothing fetches or writes, the output is advisory, and a person decides every item. The
+  worst an injection can do is a misleading brief or a needless escalation.
+- `assistant.model` may differ from the extractor's: a model checking itself tends to agree.
+
+**Measured.** `eval-assist --live` on dev: detection of six seeded, code-written mutations,
+false alarms on unmutated outputs, steps, tool calls, tokens, cost, bound hits, verified
+quotes, injection items, against a no-tools single call. **Pending labels and a live run.**
+
+**Does not prove.** That it catches real errors, which are subtler than planted ones. On
+documents this short, the single call may win; the loop should pay only on long documents
+or across items.

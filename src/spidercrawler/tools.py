@@ -24,10 +24,10 @@ from spidercrawler.config import Config
 from spidercrawler.detector import load_known
 from spidercrawler.digest import collect
 from spidercrawler.normalize import quote_in_source
-from spidercrawler.records import Document, Extraction, Item, RecordStore, Review
+from spidercrawler.records import Brief, Document, Extraction, Item, RecordStore, Review
 from spidercrawler.retrieval import FtsIndex, canonical_rule_filter, open_index
 from spidercrawler.retrieval import related_items as _related_items
-from spidercrawler.router import is_publishable
+from spidercrawler.router import effective_status, is_publishable
 from spidercrawler.status import monitoring_status as _monitoring_status
 
 MAX_ID = 80
@@ -132,6 +132,7 @@ class Toolbox:
         item = self._item(item_id)
         table = {k.item.id: k.current_table for k in load_known(self.records).values()}
         ext = self._newest_extractions().get(item.id)
+        briefs = list(self.records.iter(Brief))
         reviews = self._reviews(ext.id) if ext else []
         latest = max(reviews, key=lambda r: r.decided_at) if reviews else None
         return neutralize(
@@ -149,7 +150,7 @@ class Toolbox:
                 ],
                 "document_links": item.doc_urls,
                 "extraction_id": ext.id if ext else None,
-                "queue_status": ext.queue_status if ext else None,
+                "queue_status": effective_status(ext, briefs) if ext else None,
                 "latest_decision": latest.decision if latest else None,
                 "published": is_publishable(reviews),
             }
@@ -214,6 +215,7 @@ class Toolbox:
         """Every item with an extraction: title, queue status, flag names, latest decision,
         and counts. No summaries and no model output."""
         items = {i.id: i for i in self.records.iter(Item)}
+        briefs = list(self.records.iter(Brief))
         rows = []
         for item_id, ext in sorted(self._newest_extractions().items()):
             reviews = self._reviews(ext.id)
@@ -223,7 +225,7 @@ class Toolbox:
                     "item_id": item_id,
                     "title": items[item_id].title if item_id in items else None,
                     "extraction_id": ext.id,
-                    "queue_status": ext.queue_status,
+                    "queue_status": effective_status(ext, briefs),
                     "verifier_status": ext.verifier_status,
                     # Names only: some flags quote text the model chose.
                     "flags": sorted({f.split(":", 1)[0] for f in ext.flags}),

@@ -57,12 +57,27 @@ class Repair(BaseModel):
     max_repairs: int = Field(default=0, ge=0, le=2)  # hard cap: 2 repair calls per item
 
 
+class Assistant(BaseModel):
+    """Review assistant (docs/AGENTIC.md section 4). Advisory; off in the pipeline by default.
+
+    `model` may differ from the extractor's: a model checking its own output tends to agree
+    with itself. Empty means the extractor's model.
+    """
+
+    in_pipeline: bool = False
+    model: str = ""
+    effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    max_steps: int = Field(default=8, ge=1, le=12)  # model turns per brief
+    max_tokens: int = Field(default=80_000, ge=1_000)  # per brief, inside the run budget
+
+
 class Config(BaseModel):
     base_url: HttpUrl
     limits: Limits = Limits()
     guards: Guards = Guards()
     extractor: Extractor = Extractor()
     repair: Repair = Repair()
+    assistant: Assistant = Assistant()
     contact_email: str = PLACEHOLDER_EMAIL
     sources: list[Source]
 
