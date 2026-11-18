@@ -69,7 +69,31 @@ document corpus starts near empty; "no measurable gain" is a likely first result
 
 ## 3. Read-only MCP server
 
-_Not built yet._
+**What it does.** `tools.py` is one registry of ten read-only tools (search, items, document
+pages, related items, quote check, rule-id canonicalization, review queue, extractions,
+published entries, status). `spidercrawler mcp` serves them over stdio with the official
+`mcp` SDK, plus two resources (digest, items). `.mcp.json` registers it for Claude Code.
+Setup and examples: [MCP.md](MCP.md).
+
+**Design choices.**
+- One implementation for two callers: the MCP server and the feature 4 assistant both call
+  `Toolbox` methods, so there is one set of tests.
+- Read-only is enforced by tests, not by convention: the tool list must equal an explicit
+  allowlist, the data directory's hash is unchanged after calling every tool, and the tool
+  modules may not import the API client, the fetcher, or `decide`.
+- Unreviewed model output is returned only under `unapproved_model_output`. Only
+  `list_published` carries content a person approved.
+- Results are untrusted for whoever calls: every description says so, tag look-alikes are
+  neutralized, ids are looked up rather than used as paths, and sizes are capped.
+- Rejected: write tools (approve, reject) behind a confirmation. Approval belongs to the
+  review page, where edits are re-verified; one more door to the gate is one more to test.
+
+**Measured.** Nothing quantitative; this is plumbing. Tests drive the server through the
+SDK's in-memory client.
+
+**Does not prove.** That a client model will respect the labels. Neutralizing tags and
+marking output unreviewed tells a model what it is reading; it does not stop one from
+repeating it. The human gate is still the control.
 
 ## 4. Review assistant (the one tool-using agent)
 

@@ -47,6 +47,11 @@ Read this before relying on anything this tool produces.
   starting point for the reviewer, not a finding.
 - Prompt v2 (retrieved context) is off by default and unmeasured.
 
+## MCP server
+
+- The server labels unreviewed output and neutralizes tag-like text, but a client model can
+  still repeat what it reads. Only `list_published` returns approved content.
+
 ## Data and parsing
 
 - PDF text extraction can miss underlined additions in some documents. Those documents are

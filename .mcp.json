@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "spidercrawler": {
+      "command": "uv",
+      "args": ["run", "spidercrawler", "mcp", "--data-dir", "data-branch/data"]
+    }
+  }
+}
