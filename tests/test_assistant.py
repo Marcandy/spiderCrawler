@@ -7,6 +7,8 @@ import random
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import anthropic
+import httpx2
 import pytest
 from conftest import with_new_proposed_row
 from fastapi.testclient import TestClient
@@ -394,7 +396,7 @@ def site(crim_html, evidence_html):
     return Site(crim_html, evidence_html)
 
 
-def pipeline_run(tmp_path, site, in_pipeline):
+def pipeline_run(tmp_path, site, in_pipeline, assist_error=None):
     store = RecordStore(tmp_path)
     run_site(site, store, seed=True)
     site.pages[CRIM] = with_new_proposed_row(site.pages[CRIM])
@@ -411,6 +413,8 @@ def pipeline_run(tmp_path, site, in_pipeline):
         response = next(turns)
         if response is not None:
             return response
+        if assist_error is not None:
+            raise assist_error
         return AgentLLM(brief(finding())).parse(**kwargs)
 
     llm.parse = parse
@@ -428,6 +432,17 @@ def test_the_pipeline_step_writes_a_brief_inside_the_run_budget(tmp_path, site):
     assert record.status == "complete" and result.tokens_used == 5700 + 1100
     events = (tmp_path / "traces" / f"{result.id}.jsonl").read_text()
     assert '"step": "assist"' in events and '"step": "assist_turn"' in events
+
+
+def test_an_api_error_in_the_pipeline_step_is_recorded_and_the_run_finishes(tmp_path, site):
+    error = anthropic.APIConnectionError(request=httpx2.Request("POST", "https://api.invalid"))
+    store, result = pipeline_run(tmp_path, site, in_pipeline=True, assist_error=error)
+    (ext,) = list(store.iter(Extraction))
+    assert list(store.iter(Brief)) == [] and ext.queue_status == "needs_attention"
+    assert any(e.startswith(f"{ext.item_id}: assistant call failed:") for e in result.errors)
+    assert store.latest_run().id == result.id
+    events = (tmp_path / "traces" / f"{result.id}.jsonl").read_text()
+    assert '"outcome": "error:APIConnectionError"' in events
 
 
 def test_assist_command_needs_a_key_and_trace_reads_a_brief(store, monkeypatch):

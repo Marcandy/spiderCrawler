@@ -370,5 +370,8 @@ def _extract(
             and extraction.queue_status != "blocked"
             and extraction.output
         ):
-            _second_opinion(config, records, llm, extraction, budget, trace)
+            try:
+                _second_opinion(config, records, llm, extraction, budget, trace)
+            except anthropic.APIError as exc:  # advice is optional; the extraction stands
+                errors.append(f"{item.id}: assistant call failed: {exc}")
     return made, blocked, budget.tokens_used
