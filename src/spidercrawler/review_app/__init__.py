@@ -25,7 +25,7 @@ from spidercrawler.records import (
     RecordStore,
     Review,
 )
-from spidercrawler.retrieval import open_index, related_items
+from spidercrawler.retrieval import IndexCache, related_items
 from spidercrawler.router import DecisionRefusedError, decide, effective_status, is_publishable
 from spidercrawler.verifier import RowContext
 
@@ -42,6 +42,7 @@ def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer
     # A random token per app instance, required on every POST: another website open in the
     # same browser cannot forge a decision (CSRF), because it cannot read this page.
     csrf_token = secrets.token_urlsafe(32)
+    index = IndexCache(records, config.sources)  # built on first view, not per request
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
@@ -97,7 +98,7 @@ def create_app(records: RecordStore, config: Config, reviewer: str = "maintainer
             attempts=attempts,
             links=related_items(
                 item,
-                open_index(records, config.sources),
+                index.get(),
                 {i.id: i for i in records.iter(Item)},
                 config.sources,
             ),
