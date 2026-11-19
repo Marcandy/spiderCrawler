@@ -73,6 +73,8 @@ class AgentLLM:
         self.requests.append({**kwargs, "messages": list(kwargs["messages"])})
         step = self.script.pop(0) if self.script else "loop"
         usage = SimpleNamespace(input_tokens=1000, output_tokens=100)
+        if isinstance(step, Exception):
+            raise step
         if step == "loop":
             step = [tool_use("get_item", {"item_id": "item-synthetic-p632"})]
         if isinstance(step, list):
@@ -434,13 +436,25 @@ def test_the_pipeline_step_writes_a_brief_inside_the_run_budget(tmp_path, site):
     assert '"step": "assist"' in events and '"step": "assist_turn"' in events
 
 
+def api_error():
+    return anthropic.APIConnectionError(request=httpx2.Request("POST", "https://api.invalid"))
+
+
+def test_an_api_error_mid_review_is_a_cut_short_brief(store):
+    error = api_error()
+    llm = AgentLLM([tool_use("get_item", {"item_id": "item-synthetic-p632"})], error)
+    record = review(store, llm)
+    assert (record.status, record.cut_reason) == ("cut_short", "api error: APIConnectionError")
+    assert record.findings == [] and record.steps == 1 and str(error) not in record.cut_reason
+    assert effective_status(the_extraction(store), [record]) == "ready_for_review"
+
+
 def test_an_api_error_in_the_pipeline_step_is_recorded_and_the_run_finishes(tmp_path, site):
-    error = anthropic.APIConnectionError(request=httpx2.Request("POST", "https://api.invalid"))
-    store, result = pipeline_run(tmp_path, site, in_pipeline=True, assist_error=error)
+    store, result = pipeline_run(tmp_path, site, in_pipeline=True, assist_error=api_error())
     (ext,) = list(store.iter(Extraction))
-    assert list(store.iter(Brief)) == [] and ext.queue_status == "needs_attention"
-    assert any(e.startswith(f"{ext.item_id}: assistant call failed:") for e in result.errors)
-    assert store.latest_run().id == result.id
+    (record,) = list(store.iter(Brief))
+    assert record.cut_reason == "api error: APIConnectionError"
+    assert ext.queue_status == "needs_attention" and store.latest_run().id == result.id
     events = (tmp_path / "traces" / f"{result.id}.jsonl").read_text()
     assert '"outcome": "error:APIConnectionError"' in events
 

@@ -6,9 +6,9 @@ hand on the Messages API so every decision in it is visible and testable.
 
 Bounds: a step cap, its own token budget inside the run budget, a tool allowlist, and
 read-only tools. Hitting any bound, a refusal, or truncation stops the loop and the brief is
-stored as cut short with no findings: no brief is better than a partial one. After the loop,
-code checks every evidence quote against the source; a finding whose quote is not there is
-kept and marked unverified.
+stored as cut short with no findings: no brief is better than a partial one. An API error
+is one more such stop. After the loop, code checks every evidence quote against the source;
+a finding whose quote is not there is kept and marked unverified.
 
 Advisory only. A brief can move an item from ready_for_review to needs_attention
 (`router.effective_status`). It never unblocks, approves, edits, or reaches a public surface.
@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import anthropic
 from pydantic import BaseModel, ConfigDict, Field
 
 from spidercrawler.budget import Budget
@@ -173,21 +174,24 @@ def run_assistant(
             return cut(f"assistant token budget of {bounds.max_tokens} reached")
         if budget is not None and not budget.try_start(text):
             return cut(f"run budget: {budget.stopped_reason}")
-        with trace.step("assist_turn", attempt=step, **ids) as event:
-            response = client.messages.parse(
-                model=model,
-                max_tokens=bounds.max_output_tokens,
-                system=system,
-                messages=messages,
-                tools=tools,
-                output_config={"effort": effort},
-                output_format=ReviewBrief,
-            )
-            usage = getattr(response, "usage", None)
-            tokens_in = getattr(usage, "input_tokens", 0) or 0
-            tokens_out = getattr(usage, "output_tokens", 0) or 0
-            stop = getattr(response, "stop_reason", None)
-            event.update(input_tokens=tokens_in, output_tokens=tokens_out, outcome=str(stop))
+        try:
+            with trace.step("assist_turn", attempt=step, **ids) as event:
+                response = client.messages.parse(
+                    model=model,
+                    max_tokens=bounds.max_output_tokens,
+                    system=system,
+                    messages=messages,
+                    tools=tools,
+                    output_config={"effort": effort},
+                    output_format=ReviewBrief,
+                )
+                usage = getattr(response, "usage", None)
+                tokens_in = getattr(usage, "input_tokens", 0) or 0
+                tokens_out = getattr(usage, "output_tokens", 0) or 0
+                stop = getattr(response, "stop_reason", None)
+                event.update(input_tokens=tokens_in, output_tokens=tokens_out, outcome=str(stop))
+        except anthropic.APIError as exc:  # fails closed like any other bound; class only
+            return cut(f"api error: {type(exc).__name__}")
         out.steps, out.input_tokens, out.output_tokens = (
             step,
             out.input_tokens + tokens_in,
