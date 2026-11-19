@@ -245,6 +245,14 @@ def test_tool_results(store):
     assert box.monitoring_status()["headline"] == "Monitoring has not run yet."
 
 
+def test_search_sees_an_item_recorded_after_the_first_search(store):
+    box = toolbox(store)
+    assert box.search_rules("zyzzyva")["chunks"] == []
+    add_item(store, "p640", "Proposed Amendment of Pa.R.Crim.P. 640", text="Rule 640. Zyzzyva.")
+    (hit,) = box.search_rules("zyzzyva")["chunks"]
+    assert hit["item_id"] == "item-synthetic-p640"
+
+
 def test_argument_models_give_strict_schemas():
     schema = tools.arguments_model(Toolbox.read_document.__get__(object())).model_json_schema()
     assert schema["required"] == ["document_id"] and schema["additionalProperties"] is False
