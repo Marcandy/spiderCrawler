@@ -10,11 +10,11 @@ from types import SimpleNamespace
 import anthropic
 import httpx2
 import pytest
-from conftest import with_new_proposed_row
+from conftest import NEW_ROW, with_new_proposed_row
 from fastapi.testclient import TestClient
 from test_evaluate import item as eval_item
 from test_evaluate import labels
-from test_pipeline import CRIM, FakeLLM, Site, make_config
+from test_pipeline import CRIM, NEW_PDF, RULE632, FakeLLM, Site, make_config
 from test_pipeline import run as run_site
 from test_retrieval import CONFIG, add_item
 from test_verifier import SOURCE
@@ -457,6 +457,34 @@ def test_an_api_error_in_the_pipeline_step_is_recorded_and_the_run_finishes(tmp_
     assert ext.queue_status == "needs_attention" and store.latest_run().id == result.id
     events = (tmp_path / "traces" / f"{result.id}.jsonl").read_text()
     assert '"outcome": "error:APIConnectionError"' in events
+
+
+def test_the_pipeline_step_never_takes_budget_an_extraction_needs(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run_site(site, store, seed=True)
+    second_pdf = NEW_PDF.replace("rule-999", "rule-998")
+    second_row = NEW_ROW.replace("rule-999", "rule-998").replace("P. 999", "P. 998")
+    site.pages[CRIM] = with_new_proposed_row(site.pages[CRIM]).replace(
+        "</tbody>\n            </table>", "</tbody>" + second_row, 1
+    )
+    site.pdfs[second_pdf] = RULE632
+    config = make_config()
+    config = config.model_copy(
+        update={
+            "assistant": config.assistant.model_copy(update={"in_pipeline": True}),
+            "limits": config.limits.model_copy(update={"max_extractions_per_run": 2}),
+        }
+    )
+    extractor, agent = FakeLLM(), AgentLLM(brief(finding()), brief(finding()))
+    llm = SimpleNamespace()
+    llm.messages = llm
+    llm.parse = lambda **kw: (agent if "tools" in kw else extractor).parse(**kw)
+    result = run_site(site, store, llm=llm, config=config)
+    assert extractor.calls == 2 and len(list(store.iter(Extraction))) == 2
+    assert not any("extraction stopped" in e for e in result.errors)
+    briefs = list(store.iter(Brief))
+    assert len(briefs) == 2 and agent.requests == []
+    assert all(b.cut_reason.startswith("run budget:") for b in briefs)
 
 
 def test_assist_command_needs_a_key_and_trace_reads_a_brief(store, monkeypatch):
