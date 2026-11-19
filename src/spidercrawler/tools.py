@@ -14,7 +14,6 @@ import inspect
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
-from functools import cached_property
 from typing import Any
 
 from pydantic import ConfigDict, ValidationError, create_model
@@ -25,7 +24,7 @@ from spidercrawler.detector import load_known
 from spidercrawler.digest import collect
 from spidercrawler.normalize import quote_in_source
 from spidercrawler.records import Brief, Document, Extraction, Item, RecordStore, Review
-from spidercrawler.retrieval import FtsIndex, canonical_rule_filter, open_index
+from spidercrawler.retrieval import FtsIndex, IndexCache, canonical_rule_filter
 from spidercrawler.retrieval import related_items as _related_items
 from spidercrawler.router import effective_status, is_publishable
 from spidercrawler.status import monitoring_status as _monitoring_status
@@ -70,6 +69,7 @@ class Toolbox:
     def __init__(self, records: RecordStore, config: Config) -> None:
         self.records = records
         self.config = config
+        self._indexes = IndexCache(records, config.sources)  # the MCP server is long-lived
 
     # -- lookups: ids are matched against records, never turned into paths --
 
@@ -94,9 +94,9 @@ class Toolbox:
                 newest[ext.item_id] = ext
         return newest
 
-    @cached_property
+    @property
     def _index(self) -> FtsIndex:
-        return open_index(self.records, self.config.sources)
+        return self._indexes.get()
 
     # -- the tools --
 

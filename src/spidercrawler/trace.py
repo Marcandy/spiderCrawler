@@ -1,8 +1,9 @@
 """A per-run trace: one line per step, so a bad output can be debugged after the fact.
 
-Written once at the end of a run as `traces/<run_id>.jsonl`. It holds ids, timings, outcomes,
-and token counts. It never holds document text, a request header, or a secret: only the
-fields in `ALLOWED` are accepted, and string values must look like an id or a short code.
+Written once at the end of a run, crashed or not, as `traces/<run_id>.jsonl`. It holds ids,
+timings, outcomes, and token counts. It never holds document text, a request header, or a
+secret: only the fields in `ALLOWED` are accepted, and string values must look like an id
+or a short code.
 """
 
 import json

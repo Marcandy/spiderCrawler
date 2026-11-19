@@ -1,11 +1,14 @@
 """One run end to end: fetch → parse → health → detect → PDF text → extract → run record.
 
 A failing source never stops the run; a broken source makes the run status `failed` so the
-scheduled job alerts. Every step is timed into a trace written beside the run record.
+scheduled job alerts. Every step is timed into a trace written beside the run record. A run
+that crashes still writes both, marked `failed`, then re-raises.
 """
 
+import contextlib
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import anthropic
@@ -59,6 +62,17 @@ def needs_documents(item: Item, source: Source | None) -> bool:
     return bool(_CRIMINAL_REF.search(item.title))
 
 
+@dataclass
+class _Progress:
+    """What a run has done so far, kept outside the steps so a run that dies still says."""
+
+    checked: int = 0
+    found: int = 0
+    documents: int = 0
+    extracted: int = 0
+    blocked: int = 0
+
+
 def run_pipeline(
     config: Config,
     records: RecordStore,
@@ -80,92 +94,104 @@ def run_pipeline(
     errors: list[str] = []
     broken: list[str] = []
     unreachable: list[str] = []
-    checked = 0
-    found = 0
-    cap_hit = False
+    progress = _Progress()
+    budget = Budget.from_limits(config.limits)
     trace = Trace()
 
-    for source in config.sources:
-        try:
-            with trace.step("fetch", source_id=source.id):
-                page = fetcher.get(config.source_url(source), validators.get(source.id))
-        except RequestCapError as exc:
-            errors.append(f"{source.id}: {exc}; remaining sources skipped")
-            cap_hit = True
-            break
-        except FetchError as exc:
-            errors.append(f"{source.id}: {exc}")
-            unreachable.append(source.id)
-            continue
-        checked += 1
-        if page.not_modified:
-            continue
-
-        with trace.step("parse", source_id=source.id) as event:
-            parsed = parse_committee_page(page.content.decode("utf-8", "replace"), page.url)
-            known_here = sum(1 for k in known.values() if k.item.source_id == source.id)
-            health = check_health(parsed, known_here)
-            event["outcome"] = "ok" if health.ok else "broken"
-        if not health.ok:
-            broken.append(source.id)
-            errors.extend(f"{source.id}: broken: {reason}" for reason in health.reasons)
-            continue  # keep old validators so the page is re-read next run
-
-        seeding = seed and (seed_only is None or source.id in seed_only)
-        with trace.step("detect", source_id=source.id):
-            detection = detect(source.id, parsed.rows, known, run_id, seeding)
-        if not seeding:  # seeding is how the maintainer accepts a page that tripped a guard
-            volume = check_volume(
-                rows=len(parsed.rows),
-                new_items=len(detection.new_items),
-                known_items=known_here,
-                previous_rows=rows_seen.get(source.id),
-                guards=config.guards,
-            )
-            if not volume.ok:
-                broken.append(source.id)
-                errors.extend(f"{source.id}: broken: {reason}" for reason in volume.reasons)
-                continue  # stop and record nothing for this source
-
-        for item in detection.new_items:
-            records.write(item)
-            known[item.item_key] = KnownItem(item, item.table)
-        for event in detection.events:
-            records.write(event)
-        errors.extend(
-            f"{source.id}: row without PDF skipped: {r.title}" for r in detection.skipped_rows
+    def finish(status: str) -> Run:
+        run = Run(
+            id=run_id,
+            started_at=started,
+            finished_at=now(),
+            seed=seed,
+            sources_checked=progress.checked,
+            sources_broken=broken,
+            items_found=progress.found,
+            documents_fetched=progress.documents,
+            requests_made=fetcher.requests_made,
+            extractions_made=progress.extracted,
+            blocked=progress.blocked,
+            tokens_used=budget.tokens_used,
+            errors=errors,
+            page_validators=validators,
+            rows_seen=rows_seen,
+            status=status,
         )
-        found += len(detection.new_items)
-        validators[source.id] = page.validators
-        rows_seen[source.id] = len(parsed.rows)
+        records.write(run)
+        return run
 
-    documents = 0 if cap_hit else fetch_documents(config, records, fetcher, errors, trace=trace)
-    extraction_stats = (0, 0, 0)
-    if llm is None:
-        errors.append("extraction skipped: no LLM client (set ANTHROPIC_API_KEY)")
-    else:
-        extraction_stats = _extract(config, records, known, llm, errors, trace)
-    extracted, blocked, tokens = extraction_stats
+    try:
+        cap_hit = False
+        for source in config.sources:
+            try:
+                with trace.step("fetch", source_id=source.id):
+                    page = fetcher.get(config.source_url(source), validators.get(source.id))
+            except RequestCapError as exc:
+                errors.append(f"{source.id}: {exc}; remaining sources skipped")
+                cap_hit = True
+                break
+            except FetchError as exc:
+                errors.append(f"{source.id}: {exc}")
+                unreachable.append(source.id)
+                continue
+            progress.checked += 1
+            if page.not_modified:
+                continue
 
-    run = Run(
-        id=run_id,
-        started_at=started,
-        finished_at=now(),
-        seed=seed,
-        sources_checked=checked,
-        sources_broken=broken,
-        items_found=found,
-        documents_fetched=documents,
-        requests_made=fetcher.requests_made,
-        extractions_made=extracted,
-        blocked=blocked,
-        tokens_used=tokens,
-        errors=errors,
-        page_validators=validators,
-        rows_seen=rows_seen,
-        status=_status(config, broken, unreachable, checked),
-    )
-    records.write(run)
+            with trace.step("parse", source_id=source.id) as event:
+                parsed = parse_committee_page(page.content.decode("utf-8", "replace"), page.url)
+                known_here = sum(1 for k in known.values() if k.item.source_id == source.id)
+                health = check_health(parsed, known_here)
+                event["outcome"] = "ok" if health.ok else "broken"
+            if not health.ok:
+                broken.append(source.id)
+                errors.extend(f"{source.id}: broken: {reason}" for reason in health.reasons)
+                continue  # keep old validators so the page is re-read next run
+
+            seeding = seed and (seed_only is None or source.id in seed_only)
+            with trace.step("detect", source_id=source.id):
+                detection = detect(source.id, parsed.rows, known, run_id, seeding)
+            if not seeding:  # seeding is how the maintainer accepts a page that tripped a guard
+                volume = check_volume(
+                    rows=len(parsed.rows),
+                    new_items=len(detection.new_items),
+                    known_items=known_here,
+                    previous_rows=rows_seen.get(source.id),
+                    guards=config.guards,
+                )
+                if not volume.ok:
+                    broken.append(source.id)
+                    errors.extend(f"{source.id}: broken: {reason}" for reason in volume.reasons)
+                    continue  # stop and record nothing for this source
+
+            for item in detection.new_items:
+                records.write(item)
+                known[item.item_key] = KnownItem(item, item.table)
+            for event in detection.events:
+                records.write(event)
+            errors.extend(
+                f"{source.id}: row without PDF skipped: {r.title}" for r in detection.skipped_rows
+            )
+            progress.found += len(detection.new_items)
+            validators[source.id] = page.validators
+            rows_seen[source.id] = len(parsed.rows)
+
+        if not cap_hit:
+            progress.documents = fetch_documents(config, records, fetcher, errors, trace=trace)
+        if llm is None:
+            errors.append("extraction skipped: no LLM client (set ANTHROPIC_API_KEY)")
+        else:
+            _extract(config, records, known, llm, errors, trace, budget, progress)
+    except BaseException as exc:
+        # Write what the run did before it died: the trace matters most when a run crashes.
+        # The class only, never the message. Writing must not hide the original error.
+        errors.append(f"run stopped: {type(exc).__name__}")
+        with contextlib.suppress(Exception):
+            finish("failed")
+        with contextlib.suppress(Exception):
+            trace.write(records, run_id)
+        raise
+    run = finish(_status(config, broken, unreachable, progress.checked))
     trace.write(records, run_id)
     return run
 
@@ -268,22 +294,22 @@ def _extract(
     llm: LLMClient,
     errors: list[str],
     trace: Trace,
-) -> tuple[int, int, int]:
+    budget: Budget,
+    progress: _Progress,
+) -> None:
     """Extract every eligible item that has all its documents and no current extraction.
 
-    Returns (extractions made, blocked, tokens used). Stops when the budget is hit.
+    Counts go into `progress` as they happen. Stops when the budget is hit.
     """
     sources = {s.id: s for s in config.sources}
     system, prompt_version = load_prompt(config.extractor.prompt)
     model, effort = config.extractor.model, config.extractor.effort
-    budget = Budget.from_limits(config.limits)
     # Prompt v2 only: an index of source documents and titles, never of model outputs.
     index = open_index(records, config.sources) if config.extractor.prompt == "v2" else None
     docs_by_item: dict[str, dict[str, Document]] = {}
     for doc in records.iter(Document):
         docs_by_item.setdefault(doc.item_id, {})[doc.url] = doc
     current_table = {k.item.id: k.current_table for k in known.values()}
-    made = blocked = 0
 
     for item in sorted(records.iter(Item), key=lambda i: i.first_seen_run):
         source = sources.get(item.source_id)
@@ -363,12 +389,14 @@ def _extract(
         records.write(extraction)
         for record in attempt_recs:
             records.write(record)
-        made += bool(attempts)
-        blocked += extraction.queue_status == "blocked"
+        progress.extracted += bool(attempts)
+        progress.blocked += extraction.queue_status == "blocked"
         if (
             config.assistant.in_pipeline
             and extraction.queue_status != "blocked"
             and extraction.output
         ):
-            _second_opinion(config, records, llm, extraction, budget, trace)
-    return made, blocked, budget.tokens_used
+            try:
+                _second_opinion(config, records, llm, extraction, budget, trace)
+            except anthropic.APIError as exc:  # advice is optional; the extraction stands
+                errors.append(f"{item.id}: assistant call failed: {exc}")

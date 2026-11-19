@@ -172,6 +172,30 @@ def test_request_cap_stops_cleanly_and_documents_wait(tmp_path, site):
     assert run(site, store).documents_fetched == 1
 
 
+def test_a_crash_mid_run_still_writes_a_failed_run_and_its_trace(tmp_path, site):
+    store = RecordStore(tmp_path)
+    run(site, store, seed=True)
+    site.pages[CRIM] = with_new_proposed_row(site.pages[CRIM])
+    handler = site.handler
+
+    def broken(request):
+        if str(request.url) == NEW_PDF:
+            raise RuntimeError("a bug of ours, not a fetch error")
+        return handler(request)
+
+    site.handler = broken
+    with pytest.raises(RuntimeError):
+        run(site, store)
+    crashed = store.latest_run()
+    assert crashed.status == "failed" and crashed.items_found == 1
+    assert crashed.errors[-1] == "run stopped: RuntimeError"
+    events = (tmp_path / "traces" / f"{crashed.id}.jsonl").read_text()
+    assert '"outcome": "error:RuntimeError"' in events and "a bug of ours" not in events
+    # The next run picks up where the crash left off.
+    site.handler = handler
+    assert run(site, store).documents_fetched == 1
+
+
 def test_cli_refuses_without_contact_email(tmp_path, monkeypatch):
     monkeypatch.delenv("SPIDERCRAWLER_CONTACT_EMAIL", raising=False)
     sources = FIXTURES.parent.parent / "sources.yaml"

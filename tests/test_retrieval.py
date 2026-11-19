@@ -6,6 +6,7 @@ Nothing calls the network or the API.
 
 import itertools
 import sqlite3
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from spidercrawler.extractor import (
 from spidercrawler.records import Document, Extraction, Item, RecordStore
 from spidercrawler.retrieval import (
     FtsIndex,
+    IndexCache,
     canonical_rule_filter,
     open_index,
     related_context,
@@ -235,6 +237,29 @@ def test_related_items_exact_rule_first_then_title_and_each_says_why(store):
     assert links == related_items(adopted, open_index(store, SOURCES), items, SOURCES)
 
 
+def test_index_cache_reuses_the_index_until_a_record_is_added(store):
+    cache = IndexCache(store, SOURCES)
+    first = cache.get()
+    assert cache.get() is first
+    add_item(store, "p640", "Proposed Amendment of Pa.R.Crim.P. 640", text="Rule 640. Zyzzyva.")
+    rebuilt = cache.get()
+    assert rebuilt is not first
+    assert [h.chunk.item_id for h in rebuilt.search("zyzzyva", 5)] == ["item-synthetic-p640"]
+    assert first.search("zyzzyva", 5) == []
+
+
+def test_index_cache_answers_from_another_thread(store):
+    cache = IndexCache(store, SOURCES)
+    cache.get()
+    found: list[str] = []
+    worker = threading.Thread(
+        target=lambda: found.extend(h.chunk.item_id for h in cache.get().search("juror", 5))
+    )
+    worker.start()
+    worker.join()
+    assert "item-synthetic-p632" in found
+
+
 def test_review_page_shows_related_items_with_reasons(store):
     adopted = add_item(
         store, "a632", "Order amending Pa.R.Crim.P. 632", "approved", "run-2", text=SOURCE
@@ -252,9 +277,13 @@ def test_review_page_shows_related_items_with_reasons(store):
         document_flags=[],
     )
     store.write(ext)
-    page = TestClient(create_app(store, CONFIG)).get(f"/extraction/{ext.id}").text
+    client = TestClient(create_app(store, CONFIG))
+    page = client.get(f"/extraction/{ext.id}").text
     assert "Related items already recorded" in page and "item-synthetic-p632" in page
     assert "same rule id: Pa.R.Crim.P. 632" in page
+    # The page's index is kept, and picks up an item recorded while the app runs.
+    add_item(store, "q632", "Proposed Revision of Pa.R.Crim.P. 632")
+    assert "item-synthetic-q632" in client.get(f"/extraction/{ext.id}").text
 
 
 # -- related context for prompt v2 -----------------------------------------------------

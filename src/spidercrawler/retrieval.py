@@ -8,13 +8,14 @@ committed. Rule-id filters are exact matches on chunk metadata, never text searc
 
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass
 from typing import Protocol
 
 from spidercrawler.canonical import rule_ids
 from spidercrawler.config import Source
 from spidercrawler.corpus import Chunk, build_chunks
-from spidercrawler.records import Item, RecordStore
+from spidercrawler.records import Document, Item, ItemEvent, RecordStore
 
 SCHEMA = """
 CREATE TABLE chunks (
@@ -155,6 +156,37 @@ class FtsIndex:
 def open_index(records: RecordStore, sources: list[Source]) -> FtsIndex:
     """An in-memory index built from the records. The corpus is small; this takes moments."""
     return FtsIndex.build(build_chunks(records, sources))
+
+
+class IndexCache:
+    """One index for a long-lived process (the review page, the MCP server), rebuilt when a
+    record it is built from is added. Records are append-only, so file counts show that.
+
+    Safe across threads: the web server answers requests from a pool, so the connection is
+    shared (sqlite3 is serialized) and rebuilds take a lock.
+    """
+
+    _KINDS = (Item, ItemEvent, Document)
+
+    def __init__(self, records: RecordStore, sources: list[Source]) -> None:
+        self.records, self.sources = records, sources
+        self._lock = threading.Lock()
+        self._key: tuple[int, ...] | None = None
+        self._index: FtsIndex | None = None
+
+    def _counts(self) -> tuple[int, ...]:
+        return tuple(
+            sum(1 for _ in (self.records.root / kind.kind).glob("*.json")) for kind in self._KINDS
+        )
+
+    def get(self) -> FtsIndex:
+        with self._lock:
+            key = self._counts()
+            if self._index is None or key != self._key:
+                conn = sqlite3.connect(":memory:", check_same_thread=False)
+                self._index = FtsIndex.build(build_chunks(self.records, self.sources), conn)
+                self._key = key
+            return self._index
 
 
 def _prefix(item: Item, sources: list[Source]) -> str:
