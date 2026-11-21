@@ -103,14 +103,16 @@ tools from the registry (`read_document`, `search_rules`, `related_items`, `chec
 (`consistent`, `contradicted`, `unsupported`, `missing`), each with an evidence quote. Code
 then checks every quote with `quote_in_source`; a quote not in the source is kept, marked
 unverified. The brief is a `briefs/` record shown in a box titled "AI second opinion, not
-verified". `spidercrawler assist <id>` runs it; a pipeline step exists, off by default.
+verified". `spidercrawler assist <id>` runs it; a pipeline step exists, off by default. That
+step runs after every extraction in the run, so it only spends budget no extraction needed.
 
 **Design choices.**
 - A hand-written loop on `messages.parse` instead of the SDK's tool runner. The runner
   would loop and execute tools for us; writing it out makes each rule testable: an 8-turn
   cap, a per-brief token budget inside the run budget, an allowlist, parallel calls answered
   in one message, unknown names, bad arguments, and raising tools returned as errors.
-- Fails closed. A bound, a refusal, or truncation stores a `cut_short` brief with no findings.
+- Fails closed. A bound, a refusal, truncation, or an API error stores a `cut_short` brief
+  with no findings.
 - Escalate only. A complete brief with any non-consistent finding moves `ready_for_review`
   to `needs_attention` (`router.effective_status`). It never unblocks, approves, edits the
   extraction, or reaches the digest, the issue, or `list_published`. Each "never" is a test.

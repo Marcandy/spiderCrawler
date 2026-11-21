@@ -310,6 +310,7 @@ def _extract(
     for doc in records.iter(Document):
         docs_by_item.setdefault(doc.item_id, {})[doc.url] = doc
     current_table = {k.item.id: k.current_table for k in known.values()}
+    to_review: list[Extraction] = []
 
     for item in sorted(records.iter(Item), key=lambda i: i.first_seen_run):
         source = sources.get(item.source_id)
@@ -396,7 +397,7 @@ def _extract(
             and extraction.queue_status != "blocked"
             and extraction.output
         ):
-            try:
-                _second_opinion(config, records, llm, extraction, budget, trace)
-            except anthropic.APIError as exc:  # advice is optional; the extraction stands
-                errors.append(f"{item.id}: assistant call failed: {exc}")
+            to_review.append(extraction)
+    # Advice after every extraction, so it only spends budget that no extraction needed.
+    for extraction in to_review:
+        _second_opinion(config, records, llm, extraction, budget, trace)
